@@ -30,12 +30,9 @@ jobs:
 
             echo "--- database backup ---"
             mkdir -p /var/backups/smartai-tutor/db
-            set -a
-            . ./.env
-            set +a
             TS=$(date +%Y%m%d_%H%M%S)
             BACKUP_FILE="/var/backups/smartai-tutor/db/backup_${TS}.sql"
-            docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "$BACKUP_FILE"
+            docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$BACKUP_FILE"
             echo "Backup written: $BACKUP_FILE"
             ls -t /var/backups/smartai-tutor/db/backup_*.sql | tail -n +6 | xargs -r rm --
 
