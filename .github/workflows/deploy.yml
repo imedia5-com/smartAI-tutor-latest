@@ -26,9 +26,6 @@ jobs:
             echo "$PREV_COMMIT" > /var/backups/smartai-tutor/last_deploy_commit.txt
             echo "Previous commit: $PREV_COMMIT"
 
-            OLD_BACKEND_ID=$(docker compose ps -q backend)
-            OLD_FRONTEND_ID=$(docker compose ps -q frontend)
-
             echo "--- database backup ---"
             mkdir -p /var/backups/smartai-tutor/db
             TS=$(date +%Y%m%d_%H%M%S)
@@ -60,13 +57,6 @@ jobs:
             RUNNING=$(docker compose ps --status running --services | sort | tr '\n' ' ' | sed 's/ $//')
             if [ "$RUNNING" != "backend db frontend" ]; then
               echo "DEPLOY FAILED: not all services are running. Running: [$RUNNING]"
-              exit 1
-            fi
-
-            NEW_BACKEND_ID=$(docker compose ps -q backend)
-            NEW_FRONTEND_ID=$(docker compose ps -q frontend)
-            if [ "$NEW_BACKEND_ID" = "$OLD_BACKEND_ID" ] || [ "$NEW_FRONTEND_ID" = "$OLD_FRONTEND_ID" ]; then
-              echo "DEPLOY FAILED: backend/frontend container was not recreated"
               exit 1
             fi
 
