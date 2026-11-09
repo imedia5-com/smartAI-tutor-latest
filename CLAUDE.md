@@ -1,5 +1,11 @@
 # SmartAI Tutor — Claude Code Context
 
+> **Permanent rule — commit/PR hygiene:** never write `Co-Authored-By: Claude`,
+> "Generated with Claude", or any reference to Claude, Anthropic, or AI assistance
+> in a commit message, PR description, code comment, or any file in this repo.
+> Commit author must be the human operator's own git identity only. This applies
+> to every session, not just the one that added this note.
+
 ## What This System Is
 
 SmartAI Tutor is a commercial AI-powered tutoring platform for UK GCSE students (Key Stages 1–5). It delivers structured AI lessons using Google Gemini, a RAG knowledge base built on pgvector, and real-time voice via a custom **STT → turn → Kokoro-TTS** pipeline over WebSocket (the old Gemini Live path has been removed). The platform is deployed at **dev.smartaitutor.online**.
