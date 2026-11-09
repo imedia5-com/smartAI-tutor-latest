@@ -1,0 +1,90 @@
+name: Deploy to Server
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd /var/www/build.smartaitutor.online
+
+            echo "--- saving current commit for rollback ---"
+            PREV_COMMIT=$(git rev-parse HEAD)
+            mkdir -p /var/backups/smartai-tutor
+            echo "$PREV_COMMIT" > /var/backups/smartai-tutor/last_deploy_commit.txt
+            echo "Previous commit: $PREV_COMMIT"
+
+            OLD_BACKEND_ID=$(docker compose ps -q backend)
+            OLD_FRONTEND_ID=$(docker compose ps -q frontend)
+
+            echo "--- database backup ---"
+            mkdir -p /var/backups/smartai-tutor/db
+            set -a
+            . ./.env
+            set +a
+            TS=$(date +%Y%m%d_%H%M%S)
+            BACKUP_FILE="/var/backups/smartai-tutor/db/backup_${TS}.sql"
+            docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "$BACKUP_FILE"
+            echo "Backup written: $BACKUP_FILE"
+            ls -t /var/backups/smartai-tutor/db/backup_*.sql | tail -n +6 | xargs -r rm --
+
+            echo "--- git pull (fast-forward only) ---"
+            git pull --ff-only origin master
+            NEW_COMMIT=$(git rev-parse HEAD)
+            echo "Now at commit: $NEW_COMMIT"
+
+            echo "--- rebuild + restart (.env and volumes untouched) ---"
+            docker compose up -d --build
+
+            echo "--- pruning dangling images ---"
+            docker image prune -f
+
+            echo "--- verify ---"
+            sleep 5
+
+            ACTUAL_HEAD=$(git rev-parse HEAD)
+            if [ "$ACTUAL_HEAD" != "$NEW_COMMIT" ]; then
+              echo "DEPLOY FAILED: server HEAD ($ACTUAL_HEAD) does not match pulled commit ($NEW_COMMIT)"
+              exit 1
+            fi
+
+            RUNNING=$(docker compose ps --status running --services | sort | tr '\n' ' ' | sed 's/ $//')
+            if [ "$RUNNING" != "backend db frontend" ]; then
+              echo "DEPLOY FAILED: not all services are running. Running: [$RUNNING]"
+              exit 1
+            fi
+
+            NEW_BACKEND_ID=$(docker compose ps -q backend)
+            NEW_FRONTEND_ID=$(docker compose ps -q frontend)
+            if [ "$NEW_BACKEND_ID" = "$OLD_BACKEND_ID" ] || [ "$NEW_FRONTEND_ID" = "$OLD_FRONTEND_ID" ]; then
+              echo "DEPLOY FAILED: backend/frontend container was not recreated"
+              exit 1
+            fi
+
+            if ! curl -fsS --max-time 10 http://localhost:8001/api/health/ready > /dev/null; then
+              echo "DEPLOY FAILED: backend health check (localhost:8001/api/health/ready) did not pass"
+              exit 1
+            fi
+
+            if ! curl -fsS --max-time 10 http://localhost:3000/ > /dev/null; then
+              echo "DEPLOY FAILED: frontend (localhost:3000) did not respond"
+              exit 1
+            fi
+
+            echo "DEPLOY SUCCEEDED: commit $NEW_COMMIT is live"
+
+# Rollback (run manually if a deploy needs to be reverted):
+#   ssh <user>@<host> "cd /var/www/build.smartaitutor.online && git checkout \$(cat /var/backups/smartai-tutor/last_deploy_commit.txt) && docker compose up -d --build"
+# DB restore from the matching backup, if also needed:
+#   ssh <user>@<host> "cd /var/www/build.smartaitutor.online && cat /var/backups/smartai-tutor/db/backup_<timestamp>.sql | docker compose exec -T db psql -U <POSTGRES_USER> <POSTGRES_DB>"
