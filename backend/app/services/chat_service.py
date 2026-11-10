@@ -240,13 +240,15 @@ async def prepare_attachment_context(
       turn), answer THIS turn with the direct-inject path, persist active_document_id
       so later turns retrieve against it once it is ready
     - No new attachment but chat.active_document_id is set -> retrieve top-k chunks
-      for THIS document only; any failure/empty result/timeout/not-ready falls back
-      to no document context (plain question) rather than breaking the chat
+      for THIS document only; any failure/empty result/timeout falls back to the
+      truncated direct-inject text (read back from the saved extraction) rather
+      than breaking the chat; "still embedding" (not ready yet) falls back to no
+      document context instead, since the raw text isn't due back for re-use yet
     """
     import hashlib
     import time
     from app.models.documents import Document
-    from app.services import rag_service
+    from app.services import document_service, rag_service
 
     timings: dict = {}
     t_total0 = time.perf_counter()
@@ -271,11 +273,13 @@ async def prepare_attachment_context(
             await db.flush()
             timings["dedup_hit"] = True
         else:
+            saved_path = document_service.save_text_content(doc_text)
             doc = Document(
                 title=f"Chat attachment (chat {chat.id})",
                 key_stage="N/A", subject="General", exam_board="None", tier="None",
                 kb_type="chat_attachment", source_type="chat",
                 uploaded_by=user_id, status="pending", content_hash=content_hash,
+                file_path=saved_path, file_type="txt",
             )
             db.add(doc)
             await db.flush()
@@ -310,6 +314,18 @@ async def prepare_attachment_context(
     timings["retrieval"] = time.perf_counter() - t0
 
     if not chunks:
+        # Retrieval failed outright, timed out, or legitimately found nothing above
+        # the similarity threshold -- either way, fall back to the truncated direct
+        # text (read back from the saved extraction) so the chat never breaks.
+        if document.file_path:
+            try:
+                with open(document.file_path, "r", encoding="utf-8") as f:
+                    saved_text = f.read()
+                timings["total"] = time.perf_counter() - t_total0
+                timings["fallback_to_truncated"] = True
+                return f"[ATTACHED FILE CONTENT]\n{saved_text[:ATTACHMENT_DIRECT_THRESHOLD_CHARS]}\n\n", timings
+            except OSError as e:
+                logger.warning(f"pdf_rag fallback read failed for document {document.id}: {e}")
         timings["total"] = time.perf_counter() - t_total0
         return None, timings
 
