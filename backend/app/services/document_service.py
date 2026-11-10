@@ -340,6 +340,8 @@ async def list_documents(
         filters.append(Document.exam_board == exam_board)
     if kb_type:
         filters.append(Document.kb_type == kb_type)
+    else:
+        filters.append(Document.kb_type != "chat_attachment")
     if status:
         filters.append(Document.status == status)
 
@@ -356,7 +358,7 @@ async def list_documents(
 async def delete_document(db: AsyncSession, document_id: int) -> bool:
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
-    if not doc:
+    if not doc or doc.kb_type == "chat_attachment":
         return False
 
     if doc.file_path and os.path.exists(doc.file_path):

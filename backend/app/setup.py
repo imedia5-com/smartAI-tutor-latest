@@ -381,6 +381,12 @@ async def run_setup(fresh: bool = False, seed: bool = True):
         "CREATE INDEX IF NOT EXISTS ix_rh_document_chunks_rh_document_id ON rh_document_chunks(rh_document_id)",
         "CREATE INDEX IF NOT EXISTS ix_rh_document_chunks_slide_index ON rh_document_chunks(slide_index)",
         "CREATE INDEX IF NOT EXISTS ix_rh_chunk_embedding_hnsw ON rh_document_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
+        # PDF-RAG for chat attachments: which processed document a chat is currently
+        # grounded in, so a follow-up question can reuse it instead of reprocessing.
+        "ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_chats_active_document_id ON chats(active_document_id)",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)",
+        "CREATE INDEX IF NOT EXISTS ix_documents_content_hash ON documents(content_hash)",
     ]
     # Each migration runs in its OWN transaction. Previously they shared one, so a single
     # failure (e.g. an already-applied change on a legacy DB) aborted the transaction and

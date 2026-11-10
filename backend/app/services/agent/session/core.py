@@ -2596,11 +2596,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         await _emit_thinking(send, thinking_steps, _result_step)
 
     doc_text = None
+    attached_b64 = None
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
+        attached_b64 = image_b64
         image_b64 = None
-        if doc_text:
-            ai_content = f"[ATTACHED FILE CONTENT]\n{doc_text[:8000]}\n\n{ai_content}"
 
     message_id = None
     clean = ""
@@ -2613,6 +2613,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         if saved_user_text is not None:
             await chat_service.add_message(db, chat_id, "user", saved_user_text)
+
+        attachment_context, attachment_timings = await chat_service.prepare_attachment_context(
+            db, chat, user_id, doc_text, attached_b64, saved_user_text or ai_content,
+        )
+        if attachment_context:
+            ai_content = f"{attachment_context}{ai_content}"
+        if attachment_timings:
+            logger.info("pdf_rag turn timings chat=%s %s", chat_id, attachment_timings)
 
         # Scope RAG to THIS lesson's curriculum coordinates — most importantly the SUBTOPIC.
         # Without it, similarity search happily returns the neighbouring subtopics of the same
@@ -2672,7 +2680,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         history, rag_chunks = await chat_service.build_context(
             db, chat_id, user_query=saved_user_text or ai_content, rag_scope=_scope,
-            skip_rag=bool(doc_text))
+            skip_rag=bool(doc_text) or bool(chat.active_document_id))
         await db.commit()
 
         appt_id = _appt_id_from_chat(chat)
