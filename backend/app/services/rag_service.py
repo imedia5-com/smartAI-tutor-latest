@@ -107,8 +107,9 @@ BASE_SQL = """
     JOIN documents d ON d.id = dc.document_id
     WHERE d.status = 'ready'
       AND dc.embedding IS NOT NULL
-      AND d.kb_type = 'course_material'
 """
+
+EMBED_QUERY_TIMEOUT_SECONDS = 10
 
 TRAINING_SQL = """
     SELECT
@@ -128,12 +129,13 @@ async def retrieve_relevant_chunks(
     subject: Optional[str] = None,
     key_stage: Optional[str] = None,
     top_k: Optional[int] = None,
+    document_id: Optional[int] = None,
 ) -> List[RetrievedChunk]:
     if top_k is None:
         top_k = settings.rag_top_k
 
     try:
-        query_embedding = await embed_query(query)
+        query_embedding = await asyncio.wait_for(embed_query(query), timeout=EMBED_QUERY_TIMEOUT_SECONDS)
     except Exception as e:
         logger.warning(f"Query embedding failed, skipping RAG: {e}")
         return []
@@ -144,15 +146,21 @@ async def retrieve_relevant_chunks(
     params = [embedding_literal, top_k]
     param_idx = 3
 
-    if subject:
-        clauses.append(f"AND d.subject = ${param_idx}")
-        params.append(subject)
+    if document_id is not None:
+        clauses.append(f"AND dc.document_id = ${param_idx}")
+        params.append(document_id)
         param_idx += 1
+    else:
+        clauses.append("AND d.kb_type = 'course_material'")
+        if subject:
+            clauses.append(f"AND d.subject = ${param_idx}")
+            params.append(subject)
+            param_idx += 1
 
-    if key_stage:
-        clauses.append(f"AND d.key_stage = ${param_idx}")
-        params.append(key_stage)
-        param_idx += 1
+        if key_stage:
+            clauses.append(f"AND d.key_stage = ${param_idx}")
+            params.append(key_stage)
+            param_idx += 1
 
     where_extra = " ".join(clauses)
     sql_str = f"{BASE_SQL} {where_extra} ORDER BY dc.embedding <=> $1::vector LIMIT $2"

@@ -19,7 +19,7 @@ EXAM_BOARDS = ["AQA", "Edexcel", "OCR", "WJEC", "None"]
 
 TIERS = ["Foundation", "Higher", "None"]
 
-KB_TYPES = ["course_material", "model_training"]
+KB_TYPES = ["course_material", "model_training", "chat_attachment"]
 
 EMBEDDING_DIM = 768
 
@@ -43,6 +43,7 @@ class Document(Base):
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
     uploaded_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -169,6 +169,156 @@ async def build_context(
     return history, rag_chunks
 
 
+ATTACHMENT_DIRECT_THRESHOLD_CHARS = 8000
+ATTACHMENT_EMBED_TIMEOUT_SECONDS = 60
+ATTACHMENT_RETRIEVAL_TIMEOUT_SECONDS = 10
+
+
+async def _embed_attachment_background(document_id: int, text: str) -> None:
+    import time
+    from app.models.documents import Document, DocumentChunk
+    from app.services import document_service, rag_service
+    from app.core.config import settings as _settings
+
+    t0 = time.perf_counter()
+    try:
+        chunks = document_service.chunk_text(text, _settings.rag_chunk_size, _settings.rag_chunk_overlap)
+        t_chunk = time.perf_counter()
+        if not chunks:
+            raise ValueError("no chunks produced from attachment text")
+
+        contents = [c for c, _ in chunks]
+        embeddings = await asyncio.wait_for(
+            rag_service.embed_batch(contents), timeout=ATTACHMENT_EMBED_TIMEOUT_SECONDS
+        )
+        t_embed = time.perf_counter()
+
+        async with async_session_factory() as db:
+            doc = await db.get(Document, document_id)
+            if doc is None:
+                return
+            for idx, ((content, tok), embedding) in enumerate(zip(chunks, embeddings)):
+                db.add(DocumentChunk(
+                    document_id=document_id, chunk_index=idx, content=content,
+                    embedding=embedding, token_count=tok,
+                ))
+            doc.status = "ready"
+            doc.chunk_count = len(chunks)
+            await db.commit()
+
+        logger.info(
+            "pdf_rag background embed doc=%s chunks=%d chunk_time=%.3fs embed_time=%.3fs total=%.3fs",
+            document_id, len(chunks), t_chunk - t0, t_embed - t_chunk, time.perf_counter() - t0,
+        )
+    except Exception as e:
+        logger.warning(f"pdf_rag background embed failed for document {document_id}: {e}")
+        try:
+            async with async_session_factory() as db:
+                doc = await db.get(Document, document_id)
+                if doc is not None:
+                    doc.status = "failed"
+                    doc.error_message = str(e)[:500]
+                    await db.commit()
+        except Exception:
+            pass
+
+
+async def prepare_attachment_context(
+    db: AsyncSession,
+    chat: Chat,
+    user_id: int,
+    doc_text: Optional[str],
+    image_b64: Optional[str],
+    question_text: str,
+) -> Tuple[Optional[str], dict]:
+    """Build the [ATTACHED FILE ...] block to prepend to a turn's ai_content, for a
+    PDF/DOCX/PPTX attached in chat. Returns (context_or_None, timings).
+
+    - No attachment this turn and no persisted chat.active_document_id -> (None, {})
+    - Attachment <= 8000 chars -> old direct-inject path, unchanged
+    - Attachment > 8000 chars -> chunk+embed in the background (never blocks this
+      turn), answer THIS turn with the direct-inject path, persist active_document_id
+      so later turns retrieve against it once it is ready
+    - No new attachment but chat.active_document_id is set -> retrieve top-k chunks
+      for THIS document only; any failure/empty result/timeout/not-ready falls back
+      to no document context (plain question) rather than breaking the chat
+    """
+    import hashlib
+    import time
+    from app.models.documents import Document
+    from app.services import rag_service
+
+    timings: dict = {}
+    t_total0 = time.perf_counter()
+
+    if doc_text:
+        if len(doc_text) <= ATTACHMENT_DIRECT_THRESHOLD_CHARS:
+            chat.active_document_id = None
+            timings["total"] = time.perf_counter() - t_total0
+            return f"[ATTACHED FILE CONTENT]\n{doc_text[:ATTACHMENT_DIRECT_THRESHOLD_CHARS]}\n\n", timings
+
+        content_hash = hashlib.sha256(base64.b64decode(image_b64)).hexdigest()
+        existing = (await db.execute(
+            select(Document).where(
+                Document.uploaded_by == user_id,
+                Document.kb_type == "chat_attachment",
+                Document.content_hash == content_hash,
+            ).order_by(Document.id.desc())
+        )).scalars().first()
+
+        if existing is not None:
+            chat.active_document_id = existing.id
+            await db.flush()
+            timings["dedup_hit"] = True
+        else:
+            doc = Document(
+                title=f"Chat attachment (chat {chat.id})",
+                key_stage="N/A", subject="General", exam_board="None", tier="None",
+                kb_type="chat_attachment", source_type="chat",
+                uploaded_by=user_id, status="pending", content_hash=content_hash,
+            )
+            db.add(doc)
+            await db.flush()
+            chat.active_document_id = doc.id
+            await db.commit()
+            asyncio.create_task(_embed_attachment_background(doc.id, doc_text))
+
+        timings["total"] = time.perf_counter() - t_total0
+        return f"[ATTACHED FILE CONTENT]\n{doc_text[:ATTACHMENT_DIRECT_THRESHOLD_CHARS]}\n\n", timings
+
+    if not chat.active_document_id:
+        timings["total"] = time.perf_counter() - t_total0
+        return None, timings
+
+    document = await db.get(Document, chat.active_document_id)
+    if document is None or document.uploaded_by != user_id or document.status != "ready":
+        # Security: only ever retrieve a document that belongs to this chat's own
+        # user. status != "ready" also covers "still embedding in the background"
+        # (no context yet for this question -> plain question, not broken).
+        timings["total"] = time.perf_counter() - t_total0
+        return None, timings
+
+    t0 = time.perf_counter()
+    try:
+        chunks = await asyncio.wait_for(
+            rag_service.retrieve_relevant_chunks(db, query=question_text, document_id=document.id),
+            timeout=ATTACHMENT_RETRIEVAL_TIMEOUT_SECONDS,
+        )
+    except Exception as e:
+        logger.warning(f"pdf_rag retrieval failed/timed out for document {document.id}: {e}")
+        chunks = []
+    timings["retrieval"] = time.perf_counter() - t0
+
+    if not chunks:
+        timings["total"] = time.perf_counter() - t_total0
+        return None, timings
+
+    context = ("[ATTACHED FILE CONTEXT — most relevant excerpts]\n"
+               + "\n---\n".join(c.content for c in chunks) + "\n\n")
+    timings["total"] = time.perf_counter() - t_total0
+    return context, timings
+
+
 async def update_chat_title(db: AsyncSession, chat: Chat, title: str):
     chat.title = title
     await db.flush()
@@ -208,13 +358,13 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
     # role="thinking" message so they survive a refresh (mirrors the session pipeline).
     thinking_steps: list = []
 
-    # Attached PDF/DOCX/PPTX → extract text + inject; images stay for Gemini vision.
+    # Attached PDF/DOCX/PPTX → extract text; images stay for Gemini vision.
     doc_text = None
+    attached_b64 = None
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_sa._extract_doc_text, image_b64, image_mime)
+        attached_b64 = image_b64
         image_b64 = None
-        if doc_text:
-            ai_content = f"[ATTACHED FILE CONTENT]\n{doc_text[:8000]}\n\n{ai_content}"
 
     if research and ai_content:
         ai_content = _sa._RESEARCH_PREFIX + ai_content
@@ -230,8 +380,18 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
 
         if saved_user_text is not None:
             await add_message(db, chat_id, "user", saved_user_text)
+
+        attachment_context, attachment_timings = await prepare_attachment_context(
+            db, chat, user_id, doc_text, attached_b64, saved_user_text or ai_content,
+        )
+        if attachment_context:
+            ai_content = f"{attachment_context}{ai_content}"
+        if attachment_timings:
+            logger.info("pdf_rag turn timings chat=%s %s", chat_id, attachment_timings)
+
         history, rag_chunks = await build_context(
-            db, chat_id, user_query=saved_user_text or ai_content, skip_rag=bool(doc_text))
+            db, chat_id, user_query=saved_user_text or ai_content,
+            skip_rag=bool(doc_text) or bool(chat.active_document_id))
         chat_title = chat.title
         chat_session_id = chat.session_id
         await db.commit()

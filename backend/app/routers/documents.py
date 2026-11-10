@@ -192,7 +192,7 @@ async def retry_document(
 ):
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
-    if not doc:
+    if not doc or doc.kb_type == "chat_attachment":
         raise HTTPException(status_code=404, detail="Document not found")
 
     doc.status = "pending"
