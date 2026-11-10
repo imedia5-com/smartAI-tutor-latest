@@ -32,6 +32,7 @@ def _build_session_llm() -> ChatGoogleGenerativeAI:
         google_api_key=settings.gemini_api_key,
         temperature=1.0,
         max_retries=5,
+        api_version="v1beta",
     )
     # `include_thoughts` surfaces a brief reasoning summary for the thinking strip, but every
     # thinking token is generated BEFORE the answer, so the budget is pure added latency. It's
@@ -83,6 +84,7 @@ def get_chat_llm(tools: list = None) -> BaseChatModel:
             google_api_key=settings.gemini_api_key,
             temperature=1.0,
             max_retries=5,
+            api_version="v1beta",
         )
         logger.info(f"Chat LLM singleton created: model={settings.gemini_chat_model}")
     return _chat_llm.bind_tools(tools) if tools else _chat_llm
