@@ -46,7 +46,6 @@ jobs:
             docker image prune -f
 
             echo "--- verify ---"
-            sleep 5
 
             ACTUAL_HEAD=$(git rev-parse HEAD)
             if [ "$ACTUAL_HEAD" != "$NEW_COMMIT" ]; then
@@ -60,8 +59,16 @@ jobs:
               exit 1
             fi
 
-            if ! curl -fsS --max-time 10 http://localhost:8001/api/health/ready > /dev/null; then
-              echo "DEPLOY FAILED: backend health check (localhost:8001/api/health/ready) did not pass"
+            BACKEND_READY=false
+            for i in $(seq 1 18); do
+              if curl -fsS --max-time 5 http://localhost:8001/api/health/ready > /dev/null 2>&1; then
+                BACKEND_READY=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$BACKEND_READY" != "true" ]; then
+              echo "DEPLOY FAILED: backend health check (localhost:8001/api/health/ready) did not pass within 90s"
               exit 1
             fi
 
