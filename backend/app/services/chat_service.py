@@ -116,6 +116,7 @@ async def build_context(
     chat_id: int,
     user_query: Optional[str] = None,
     rag_scope: Optional[dict] = None,
+    skip_rag: bool = False,
 ) -> Tuple[List[dict], List[RetrievedChunk]]:
     messages = await get_chat_history(db, chat_id)
     # Only real conversation turns go to the LLM. Persisted lifecycle/interactive
@@ -128,7 +129,7 @@ async def build_context(
 
     rag_chunks: List[RetrievedChunk] = []
 
-    if user_query:
+    if user_query and not skip_rag:
         try:
             from app.core.config import settings
             if settings.rag_enabled:
@@ -208,6 +209,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
     thinking_steps: list = []
 
     # Attached PDF/DOCX/PPTX → extract text + inject; images stay for Gemini vision.
+    doc_text = None
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_sa._extract_doc_text, image_b64, image_mime)
         image_b64 = None
@@ -228,7 +230,8 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
 
         if saved_user_text is not None:
             await add_message(db, chat_id, "user", saved_user_text)
-        history, rag_chunks = await build_context(db, chat_id, user_query=saved_user_text or ai_content)
+        history, rag_chunks = await build_context(
+            db, chat_id, user_query=saved_user_text or ai_content, skip_rag=bool(doc_text))
         chat_title = chat.title
         chat_session_id = chat.session_id
         await db.commit()

@@ -4,6 +4,7 @@ and generates practice/test assessments scoped to a specific appointment.
 """
 import asyncio
 import base64
+import functools
 import io
 import json
 import logging
@@ -1802,6 +1803,7 @@ _DOC_TYPES = {
 }
 
 
+@functools.lru_cache(maxsize=8)
 def _extract_doc_text(b64: str, mime: str) -> Optional[str]:
     """Extract text from an attached PDF/DOCX/PPTX (reuses document_service)."""
     entry = _DOC_TYPES.get(mime)
@@ -2593,6 +2595,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     if _result_step:
         await _emit_thinking(send, thinking_steps, _result_step)
 
+    doc_text = None
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
         image_b64 = None
@@ -2668,7 +2671,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             logger.warning("RAG scope build failed for chat %s", chat_id, exc_info=True)
 
         history, rag_chunks = await chat_service.build_context(
-            db, chat_id, user_query=saved_user_text or ai_content, rag_scope=_scope)
+            db, chat_id, user_query=saved_user_text or ai_content, rag_scope=_scope,
+            skip_rag=bool(doc_text))
         await db.commit()
 
         appt_id = _appt_id_from_chat(chat)
