@@ -159,10 +159,11 @@ async def build_context(
                                     "RAG scope widened to level %d (%s) — no chunks at the "
                                     "tighter scope", i, ",".join(sorted(flt)))
                             break
-                else:
-                    # Free simple chat: loosely grounded in Resource Hub content
-                    # (no curriculum filter — just similarity).
-                    rag_chunks = await retrieve_hub_chunks(db=db, query=user_query)
+                # Free simple chat (no lesson/curriculum scope): skip the unscoped
+                # similarity lookup entirely. It paid a full embed_query round-trip
+                # (0.4-1.4s) on every message for a loose, unfiltered match -- real
+                # curriculum grounding in a lesson (the `rag_scope` branch above) is
+                # untouched.
         except Exception as e:
             logger.warning(f"RAG retrieval skipped: {e}")
 

@@ -33,7 +33,7 @@ export function playCorrectSound() {
   });
 }
 
-/** Soft downward buzz — wrong, but not punishing. */
+/** Soft "oops" blip — wrong, but gentle, not a harsh buzz. */
 export function playWrongSound() {
   const audio = ctx();
   if (!audio) return;
@@ -41,13 +41,13 @@ export function playWrongSound() {
   const gain = audio.createGain();
   osc.connect(gain);
   gain.connect(audio.destination);
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(220, audio.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(110, audio.currentTime + 0.3);
-  gain.gain.setValueAtTime(0.16, audio.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, audio.currentTime + 0.32);
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(330, audio.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(220, audio.currentTime + 0.18);
+  gain.gain.setValueAtTime(0.14, audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.22);
   osc.start();
-  osc.stop(audio.currentTime + 0.32);
+  osc.stop(audio.currentTime + 0.23);
 }
 
 /** A short blip for each tap/placement — makes a manipulative feel physical. */

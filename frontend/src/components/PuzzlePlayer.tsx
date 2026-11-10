@@ -160,10 +160,12 @@ export default function PuzzlePlayer({
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: panelBg }}>
       <PuzzleDecor junior={t.isJunior} />
-      {/* Loading veil: the puzzle is on screen but blurred + non-interactive until the tutor has
-          FINISHED SPEAKING this turn (TTS completion). Being on top, it also swallows clicks so
-          the student can't answer before it clears. Only shown when Read Aloud is on. */}
-      {locked && (
+      {/* Loading veil: an INTERACTIVE puzzle is on screen but blurred + non-interactive until the
+          tutor has FINISHED SPEAKING this turn (TTS completion), so a student can't answer before
+          the tutor's explanation clears. Being on top, it also swallows clicks. Only shown when
+          Read Aloud is on. Display-only visuals (diagram/image/animation) have nothing to submit,
+          so they skip this gate entirely and show as soon as their data arrives. */}
+      {locked && !isExplanatory && (
         <div
           aria-hidden
           style={{
@@ -174,15 +176,15 @@ export default function PuzzlePlayer({
             gap: 12, cursor: "wait",
           }}
         >
-          <div style={{
-            width: 30, height: 30, borderRadius: "50%",
-            border: "3px solid rgba(124,58,237,0.25)", borderTopColor: "#7c3aed",
-            animation: "puzzleGateSpin 0.8s linear infinite",
-          }} />
+          <img
+            src="/images/aitutor 4 schools-robo.png"
+            alt=""
+            style={{ height: 52, width: "auto", objectFit: "contain", animation: "puzzleGateMascot 1.1s ease-in-out infinite" }}
+          />
           <span style={{ fontSize: 13, fontWeight: 700, color: dark ? "rgba(255,255,255,0.9)" : "#475569" }}>
-            Loading…
+            Speaking…
           </span>
-          <style>{"@keyframes puzzleGateSpin { to { transform: rotate(360deg); } }"}</style>
+          <style>{"@keyframes puzzleGateMascot { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }"}</style>
         </div>
       )}
       <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8, background: "#fff" }}>

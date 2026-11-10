@@ -1212,21 +1212,8 @@ export default function BookSessionPage() {
                   </div>
                 </div>
 
-                {/* Learn Mode cards — the picker isn't live yet; blur the whole block + mark
-                    "Coming soon" (non-interactive). The default learn mode still applies underneath. */}
                 <div style={{ position: "relative" }}>
-                  <div style={{ position: "absolute", inset: 0, zIndex: 5, borderRadius: 12,
-                                display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{
-                      fontSize: 13, fontWeight: 800, color: "#475569", background: "#fff",
-                      border: "1px solid #e2e8f0", padding: "6px 14px", borderRadius: 99,
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-                    }}>
-                      Coming soon
-                    </span>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 6,
-                                filter: "blur(3px)", opacity: 0.7, pointerEvents: "none", userSelect: "none" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 6 }}>
                     {LEARN_MODE_OPTIONS.map((m) => {
                       const sel = learnMode === m.id;
                       return (
