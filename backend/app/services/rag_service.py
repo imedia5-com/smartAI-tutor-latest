@@ -64,24 +64,44 @@ async def embed_query(text: str) -> List[float]:
     return await loop.run_in_executor(None, _embed_sync, text, "RETRIEVAL_QUERY")
 
 
+_EMBED_MAX_ATTEMPTS = 3
+_EMBED_BACKOFF_BASE_SECONDS = 2.0
+
+
+async def _retry_with_backoff(fn, *args):
+    last_exc: Optional[Exception] = None
+    for attempt in range(_EMBED_MAX_ATTEMPTS):
+        try:
+            return await fn(*args)
+        except Exception as e:
+            last_exc = e
+            if attempt < _EMBED_MAX_ATTEMPTS - 1:
+                wait = _EMBED_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                logger.warning(f"embed attempt {attempt + 1}/{_EMBED_MAX_ATTEMPTS} failed, retrying in {wait:.0f}s: {e}")
+                await asyncio.sleep(wait)
+    raise last_exc
+
+
 async def embed_batch(texts: List[str]) -> List[List[float]]:
     if not texts:
         return []
 
     loop = asyncio.get_event_loop()
-    batch_size = 20
+    batch_size = 10
     all_embeddings = []
 
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         try:
-            embeddings = await loop.run_in_executor(None, _embed_batch_sync, batch, "RETRIEVAL_DOCUMENT")
+            embeddings = await _retry_with_backoff(
+                lambda b=batch: loop.run_in_executor(None, _embed_batch_sync, b, "RETRIEVAL_DOCUMENT")
+            )
             all_embeddings.extend(embeddings)
         except Exception as e:
             logger.warning(f"Batch embed failed for chunk {i}-{i+len(batch)}: {e}, falling back to sequential")
             for t in batch:
                 try:
-                    emb = await embed_text(t)
+                    emb = await _retry_with_backoff(embed_text, t)
                     all_embeddings.append(emb)
                 except Exception as inner_e:
                     logger.error(f"Single embed failed: {inner_e}")

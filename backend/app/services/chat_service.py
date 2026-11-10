@@ -193,6 +193,19 @@ async def _embed_attachment_background(document_id: int, text: str) -> None:
         )
         t_embed = time.perf_counter()
 
+        # embed_batch falls back to an all-zero vector for a chunk it could never embed
+        # (e.g. a rate-limited quota that outlasts its own retries) rather than raising, so
+        # callers always get a same-length list back. A chat attachment must be all-or-nothing:
+        # a document with even one zero-vector chunk would silently corrupt retrieval (it can
+        # rank as "relevant" and get served as context, or just as easily hide real content),
+        # so refuse to persist ANY chunk for this document and fail it instead.
+        failed_count = sum(1 for e in embeddings if all(v == 0.0 for v in e))
+        if failed_count:
+            raise RuntimeError(
+                f"{failed_count}/{len(embeddings)} chunks failed to embed (rate-limited or API "
+                "error) -- refusing to persist a partially-embedded document"
+            )
+
         async with async_session_factory() as db:
             doc = await db.get(Document, document_id)
             if doc is None:
@@ -223,6 +236,18 @@ async def _embed_attachment_background(document_id: int, text: str) -> None:
             pass
 
 
+def _read_fallback_text(document) -> Optional[str]:
+    if not document.file_path:
+        return None
+    try:
+        with open(document.file_path, "r", encoding="utf-8") as f:
+            saved_text = f.read()
+    except OSError as e:
+        logger.warning(f"pdf_rag fallback read failed for document {document.id}: {e}")
+        return None
+    return f"[ATTACHED FILE CONTENT]\n{saved_text[:ATTACHMENT_DIRECT_THRESHOLD_CHARS]}\n\n"
+
+
 async def prepare_attachment_context(
     db: AsyncSession,
     chat: Chat,
@@ -240,10 +265,10 @@ async def prepare_attachment_context(
       turn), answer THIS turn with the direct-inject path, persist active_document_id
       so later turns retrieve against it once it is ready
     - No new attachment but chat.active_document_id is set -> retrieve top-k chunks
-      for THIS document only; any failure/empty result/timeout falls back to the
-      truncated direct-inject text (read back from the saved extraction) rather
-      than breaking the chat; "still embedding" (not ready yet) falls back to no
-      document context instead, since the raw text isn't due back for re-use yet
+      for THIS document only; any failure/empty result/timeout/embed-failure falls
+      back to the truncated direct-inject text (read back from the saved extraction)
+      rather than breaking the chat; "still embedding" (not ready yet) falls back to
+      no document context instead, since the raw text isn't due back for re-use yet
     """
     import hashlib
     import time
@@ -295,10 +320,25 @@ async def prepare_attachment_context(
         return None, timings
 
     document = await db.get(Document, chat.active_document_id)
-    if document is None or document.uploaded_by != user_id or document.status != "ready":
-        # Security: only ever retrieve a document that belongs to this chat's own
-        # user. status != "ready" also covers "still embedding in the background"
-        # (no context yet for this question -> plain question, not broken).
+    if document is None or document.uploaded_by != user_id:
+        # Security: only ever retrieve a document that belongs to this chat's own user.
+        timings["total"] = time.perf_counter() - t_total0
+        return None, timings
+
+    if document.status == "failed":
+        # Embedding never completed (e.g. a sustained rate limit outlasted every retry) --
+        # same "never break the chat" guarantee as a retrieval failure: fall back to the
+        # truncated direct text rather than leaving the question with no context at all.
+        fallback = _read_fallback_text(document)
+        timings["total"] = time.perf_counter() - t_total0
+        if fallback is not None:
+            timings["fallback_to_truncated"] = True
+            return fallback, timings
+        return None, timings
+
+    if document.status != "ready":
+        # Still embedding in the background -- no context yet for this question (plain
+        # question, not broken); the raw text isn't due back for re-use until it resolves.
         timings["total"] = time.perf_counter() - t_total0
         return None, timings
 
@@ -317,15 +357,11 @@ async def prepare_attachment_context(
         # Retrieval failed outright, timed out, or legitimately found nothing above
         # the similarity threshold -- either way, fall back to the truncated direct
         # text (read back from the saved extraction) so the chat never breaks.
-        if document.file_path:
-            try:
-                with open(document.file_path, "r", encoding="utf-8") as f:
-                    saved_text = f.read()
-                timings["total"] = time.perf_counter() - t_total0
-                timings["fallback_to_truncated"] = True
-                return f"[ATTACHED FILE CONTENT]\n{saved_text[:ATTACHMENT_DIRECT_THRESHOLD_CHARS]}\n\n", timings
-            except OSError as e:
-                logger.warning(f"pdf_rag fallback read failed for document {document.id}: {e}")
+        fallback = _read_fallback_text(document)
+        if fallback is not None:
+            timings["total"] = time.perf_counter() - t_total0
+            timings["fallback_to_truncated"] = True
+            return fallback, timings
         timings["total"] = time.perf_counter() - t_total0
         return None, timings
 
