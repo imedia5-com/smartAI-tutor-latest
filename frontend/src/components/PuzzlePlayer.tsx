@@ -160,10 +160,12 @@ export default function PuzzlePlayer({
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: panelBg }}>
       <PuzzleDecor junior={t.isJunior} />
-      {/* Loading veil: the puzzle is on screen but blurred + non-interactive until the tutor has
-          FINISHED SPEAKING this turn (TTS completion). Being on top, it also swallows clicks so
-          the student can't answer before it clears. Only shown when Read Aloud is on. */}
-      {locked && (
+      {/* Loading veil: an INTERACTIVE puzzle is on screen but blurred + non-interactive until the
+          tutor has FINISHED SPEAKING this turn (TTS completion), so a student can't answer before
+          the tutor's explanation clears. Being on top, it also swallows clicks. Only shown when
+          Read Aloud is on. Display-only visuals (diagram/image/animation) have nothing to submit,
+          so they skip this gate entirely and show as soon as their data arrives. */}
+      {locked && !isExplanatory && (
         <div
           aria-hidden
           style={{
