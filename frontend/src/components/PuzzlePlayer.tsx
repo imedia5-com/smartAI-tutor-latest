@@ -176,15 +176,15 @@ export default function PuzzlePlayer({
             gap: 12, cursor: "wait",
           }}
         >
-          <div style={{
-            width: 30, height: 30, borderRadius: "50%",
-            border: "3px solid rgba(124,58,237,0.25)", borderTopColor: "#7c3aed",
-            animation: "puzzleGateSpin 0.8s linear infinite",
-          }} />
+          <img
+            src="/images/aitutor 4 schools-robo.png"
+            alt=""
+            style={{ height: 52, width: "auto", objectFit: "contain", animation: "puzzleGateMascot 1.1s ease-in-out infinite" }}
+          />
           <span style={{ fontSize: 13, fontWeight: 700, color: dark ? "rgba(255,255,255,0.9)" : "#475569" }}>
-            Loading…
+            Speaking…
           </span>
-          <style>{"@keyframes puzzleGateSpin { to { transform: rotate(360deg); } }"}</style>
+          <style>{"@keyframes puzzleGateMascot { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }"}</style>
         </div>
       )}
       <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8, background: "#fff" }}>
