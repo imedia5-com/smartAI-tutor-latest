@@ -1679,12 +1679,23 @@ def clean_reasoning_leak(sentence: str) -> str:
     return "" if _REASONING_SHAPE.search(s.strip()) else s
 
 
+_WORD = _re.compile(r"\S+")
+# Keep the first segment of a TTS turn SHORT (~this many words), so Kokoro only has to
+# synthesise a tiny clip before the student hears anything — synthesis time scales with
+# text length, so this is the cheapest lever for the "text visible -> speech starts" gap.
+# Only the first segment is shortened; the rest of that sentence becomes its own (normal)
+# segment right after, and every later segment in the turn is unaffected.
+_FIRST_CHUNK_MAX_WORDS = 7
+
+
 class SentenceSegmenter:
     """Accumulates streamed text and emits complete segments (~sentences)."""
 
-    def __init__(self, max_chars: int = _MAX_SEGMENT_CHARS):
+    def __init__(self, max_chars: int = _MAX_SEGMENT_CHARS, short_first: bool = False):
         self._buf = ""
         self._max = max_chars
+        self._short_first = short_first
+        self._emitted_any = False
 
     def feed(self, text: str) -> list:
         self._buf += text
@@ -1695,6 +1706,7 @@ class SentenceSegmenter:
                 break
             if seg:
                 out.append(seg)
+                self._emitted_any = True
         return out
 
     def flush(self) -> Optional[str]:
@@ -1702,6 +1714,15 @@ class SentenceSegmenter:
         seg = self._buf
         self._buf = ""
         return seg or None
+
+    def _short_first_cut(self, buf: str) -> Optional[int]:
+        words = list(_WORD.finditer(buf))
+        if len(words) < _FIRST_CHUNK_MAX_WORDS:
+            return None  # not enough buffered yet -- wait for more, or a real sentence end
+        end = words[_FIRST_CHUNK_MAX_WORDS - 1].end()
+        if end >= len(buf):
+            return None  # nothing buffered after the cut point to use as a clean boundary
+        return end + 1 if buf[end] in " \n\t" else end
 
     def _take(self) -> Optional[str]:
         # Each segment keeps its trailing separator (the sentence-ending space or
@@ -1722,6 +1743,14 @@ class SentenceSegmenter:
                 end = i + 1
                 self._buf = buf[end:]
                 return buf[:end]
+        # No sentence/paragraph end yet. If this is still the turn's first segment and the
+        # first sentence is running long, force an early cut once enough words have
+        # buffered rather than waiting for its real end.
+        if self._short_first and not self._emitted_any:
+            cut = self._short_first_cut(buf)
+            if cut is not None:
+                self._buf = buf[cut:]
+                return buf[:cut]
         if len(buf) >= self._max:
             cut = buf.rfind(" ", 0, self._max)
             if cut <= 0:
@@ -2993,7 +3022,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         hist_slice = history[:-1] if saved_user_text is not None else history
 
-        segmenter = SentenceSegmenter()
+        segmenter = SentenceSegmenter(short_first=tts)
         seq = 0
         full: list = []          # the deduped sentences actually shown (also persisted)
         _seen_norm: set = set()  # normalised sentences already streamed THIS turn
