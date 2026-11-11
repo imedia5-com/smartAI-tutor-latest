@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 /**
  * ResourceViewer — renders the Resource Hub resource the AI is currently teaching
  * from, driven by `show_resource` / advance / retreat tool events on the session
@@ -56,7 +58,7 @@ const TYPE_LABEL: Record<string, string> = {
   external_link: "Link",
 };
 
-export default function ResourceViewer({ slide }: { slide: ResourceSlide }) {
+function ResourceViewer({ slide }: { slide: ResourceSlide }) {
   const src = viewerSrc(slide);
   const typeLabel = TYPE_LABEL[(slide.resourceType || "").toLowerCase()] || slide.resourceType || "Resource";
   const showSlideCount = slide.pageCount > 1;
@@ -119,3 +121,10 @@ export default function ResourceViewer({ slide }: { slide: ResourceSlide }) {
     </div>
   );
 }
+
+// Same reasoning as PuzzlePlayer's memo wrap: the chat panel's streaming text re-renders
+// the whole session page every ~40-200ms, which otherwise reloaded/rebuilt this panel's
+// tree (and the embedded PDF/Office iframe below it) just as often, even on an unchanged
+// slide — the visible symptom was the resource panel stuttering/"freezing" while a reply
+// streamed, unable to scroll or read it.
+export default memo(ResourceViewer);

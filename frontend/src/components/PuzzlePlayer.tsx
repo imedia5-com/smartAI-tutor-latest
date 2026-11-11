@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { PuzzlePayload } from "./puzzles/types";
 import ExplanatoryImage from "./puzzles/ExplanatoryImage";
 import SvgDiagram from "./puzzles/SvgDiagram";
@@ -56,7 +56,7 @@ const MANIPULATIVE_RENDERS = new Set([
   "ph_scale", "force_arrows", "punnett_square",
 ]);
 
-export default function PuzzlePlayer({
+function PuzzlePlayer({
   payload, onSubmit, locked = false, keyStage,
 }: { payload: PuzzlePayload; onSubmit: (answer: unknown) => void; locked?: boolean; keyStage?: string }) {
   const [submitted, setSubmitted] = useState(false);
@@ -290,3 +290,9 @@ function PuzzleDecor({ junior }: { junior: boolean }) {
     </>
   );
 }
+
+// The chat panel's streaming text re-renders the whole session page every ~40-200ms while
+// a reply is being revealed. Without this, that cascaded into every puzzle/diagram re-render
+// too, even though neither the payload nor the lock state had actually changed that often —
+// the visible symptom was the practice panel stuttering/"freezing" for the whole reply.
+export default memo(PuzzlePlayer);
