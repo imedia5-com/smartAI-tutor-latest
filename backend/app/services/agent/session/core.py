@@ -1730,27 +1730,35 @@ class SentenceSegmenter:
         # original text verbatim — which is what makes markdown (lists, paragraphs)
         # render correctly during the live stream, not just after turn_end.
         buf = self._buf
+        # Find the earliest NATURAL boundary (paragraph, then sentence) first, without
+        # cutting yet -- a short-first force-cut must still defer to one of these if it
+        # falls EARLIER in the buffer (e.g. "Hi!\n\n..." is already short on its own), but
+        # must WIN over a later one (e.g. a friendly greeting-then-question paragraph that
+        # runs long before its first "\n\n") so the turn's first segment is never longer
+        # than necessary just because a paragraph break happened to come first.
+        natural_end = None
         para = buf.find("\n\n")
         if para != -1:
-            end = para + 2
-            self._buf = buf[end:]
-            return buf[:end]
-        for m in _SENT_END.finditer(buf):
-            i = m.end()
-            if i >= len(buf):
-                break
-            if buf[i] in " \n\t":
-                end = i + 1
-                self._buf = buf[end:]
-                return buf[:end]
-        # No sentence/paragraph end yet. If this is still the turn's first segment and the
-        # first sentence is running long, force an early cut once enough words have
-        # buffered rather than waiting for its real end.
+            natural_end = para + 2
+        else:
+            for m in _SENT_END.finditer(buf):
+                i = m.end()
+                if i >= len(buf):
+                    break
+                if buf[i] in " \n\t":
+                    natural_end = i + 1
+                    break
+
         if self._short_first and not self._emitted_any:
-            cut = self._short_first_cut(buf)
-            if cut is not None:
-                self._buf = buf[cut:]
-                return buf[:cut]
+            short_end = self._short_first_cut(buf)
+            if short_end is not None and (natural_end is None or short_end < natural_end):
+                self._buf = buf[short_end:]
+                return buf[:short_end]
+
+        if natural_end is not None:
+            self._buf = buf[natural_end:]
+            return buf[:natural_end]
+
         if len(buf) >= self._max:
             cut = buf.rfind(" ", 0, self._max)
             if cut <= 0:
