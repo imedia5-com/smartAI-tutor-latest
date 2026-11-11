@@ -312,6 +312,15 @@ export default function SessionPage() {
   // on (it always reflects the live turn state).
   const interactionLocked = ttsEnabled && (busy || ttsSpeaking);
 
+  // Stable function identity (not an inline arrow at the JSX call site) so PuzzlePlayer's
+  // React.memo actually bails out on the streaming re-renders this prop sits inside of —
+  // an inline `onSubmit={(answer) => ...}` would get a NEW reference every single reveal
+  // tick (every ~40-200ms while the tutor's reply is streaming), defeating memo entirely.
+  const handlePuzzleSubmit = useCallback((answer: unknown) => {
+    if (!currentPuzzle) return;
+    channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer);
+  }, [channel.sendPuzzleResult, currentPuzzle]);
+
   // Hands-free voice loop: capture the student's utterance and send it over the
   // SAME session WebSocket as `user_audio`. The mic is muted while a turn runs
   // (busy) AND while the tutor is SPEAKING (audioActive, incl. a short tail) — the AI's
@@ -1213,9 +1222,7 @@ export default function SessionPage() {
                 payload={currentPuzzle}
                 locked={interactionLocked}
                 keyStage={sessionKeyStage}
-                onSubmit={(answer) =>
-                  channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer)
-                }
+                onSubmit={handlePuzzleSubmit}
               />
             </div>
           ) : (
