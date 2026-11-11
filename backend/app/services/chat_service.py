@@ -473,7 +473,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
         )
 
         hist_slice = history[:-1] if saved_user_text is not None else history
-        segmenter = _sa.SentenceSegmenter()
+        segmenter = _sa.SentenceSegmenter(short_first=tts)
         seq = 0
         full: list = []
         import json as _json2
