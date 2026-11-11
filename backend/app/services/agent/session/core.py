@@ -3069,6 +3069,22 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     await _emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
                     continue
                 if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
+                    # A tool's result (e.g. quick-reply buttons, a new slide) is reported to the
+                    # client IMMEDIATELY, but any narration the model already wrote before calling
+                    # the tool only reaches the client once the segmenter detects a full sentence
+                    # boundary -- so a short lead-in ("Great job!") or one still missing its final
+                    # punctuation could sit buffered while the tool's effect shows up first, with
+                    # no text/speech on screen yet to explain it. Flush whatever's pending now
+                    # (even if it's not a complete sentence) so it's always seen before the tool
+                    # that follows it.
+                    if not suppress_text:
+                        _pending = segmenter.flush()
+                        if _pending:
+                            _pending = clean_reasoning_leak(_pending)
+                            if _pending.strip() and not _dup(_pending):
+                                await stream_segment(send, seq, _pending, tts=tts, turn_id=turn_id, voice=_tts_voice)
+                                full.append(_pending)
+                                seq += 1
                     try:
                         tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
                         _tool = tr.get("tool", "")
