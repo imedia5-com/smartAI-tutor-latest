@@ -1617,8 +1617,17 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
 # Bound concurrent Kokoro inferences across all sessions (avoid CPU oversubscription).
 _TTS_MAX_CONCURRENCY = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
 _tts_semaphore = asyncio.Semaphore(_TTS_MAX_CONCURRENCY)
-# Strong refs to in-flight background TTS tasks so they aren't GC'd mid-synthesis.
-_bg_tts_tasks: set = set()
+# One ordered queue + one worker per in-flight turn (keyed by turn_id). Segments within a
+# turn are synthesised ONE AT A TIME, in seq order — firing every segment's TTS as its own
+# concurrent task let Kokoro finish them in WHATEVER order the CPU scheduled them, so the
+# client's strict in-order playback queue stalled on whichever segment happened to be
+# slowest (observed: segment 0's audio arriving dead last, ~18s after segment 3's). A
+# single sequential worker guarantees segment 0 is always synthesised first and with no
+# contention from its own turn's later segments, so speech starts as soon as humanly
+# possible after the first sentence — later segments still synthesise in the background,
+# off the critical path for text/LLM streaming.
+_tts_turn_queues: dict = {}
+_tts_turn_workers: dict = {}
 
 _MAX_SEGMENT_CHARS = 240
 _MIN_TTS_CHARS = 3
@@ -1757,25 +1766,60 @@ async def _tts_segment(send, seq: int, text: str, turn_id: str, voice: Optional[
         pass
 
 
+async def _tts_turn_worker(turn_id: str) -> None:
+    """Drains ONE turn's TTS queue strictly in seq order, one segment at a time, so the
+    client's in-order playback queue is never kept waiting on a LATER segment that just
+    happened to synthesise faster. Exits (and cleans up its queue) on the `None` sentinel
+    enqueued once the turn's text is fully streamed. A turn that times out/crashes before
+    reaching that point (the _guard_turn wrapper doesn't have the turn_id to signal it)
+    would otherwise leak this task forever waiting on an empty queue — a 30s idle timeout
+    is the self-healing fallback."""
+    q = _tts_turn_queues[turn_id]
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(q.get(), timeout=30)
+            except asyncio.TimeoutError:
+                break
+            if item is None:
+                break
+            send, seq, display, voice = item
+            await _tts_segment(send, seq, display, turn_id, voice)
+    finally:
+        _tts_turn_queues.pop(turn_id, None)
+        _tts_turn_workers.pop(turn_id, None)
+
+
+async def end_tts_turn(turn_id: str) -> None:
+    """Signal that no more segments are coming for this turn. Audio already queued keeps
+    playing/synthesising in the background; this just lets the worker clean itself up once
+    it drains. Safe to call even if the turn never queued any TTS (no-op)."""
+    q = _tts_turn_queues.get(turn_id)
+    if q is not None:
+        await q.put(None)
+
+
+async def send_turn_end(send, turn_id: str, message_id, full_text: str) -> None:
+    """Send `turn_end` and let this turn's TTS worker know no more segments are coming."""
+    await end_tts_turn(turn_id)
+    await send({"type": "turn_end", "message_id": message_id, "full_text": full_text})
+
+
 async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str,
                          tts_tasks: Optional[list] = None, voice: Optional[str] = None) -> None:
     """Send a segment's display TEXT immediately (GPT-style fast streaming), then — if
-    TTS is on — synthesise its audio in the BACKGROUND and ship it as a later
-    `segment_audio` frame (one per seq, possibly null). Text never waits on Kokoro.
-    Shared by the session and /chat turn pipelines.
-
-    `tts_tasks`: when given, THIS turn's TTS tasks are collected into it so the caller can
-    await them all and then emit a `tts_done` frame — the authoritative "the tutor has
-    finished speaking" signal the client gates puzzles/tap-options on."""
+    TTS is on — queue its audio synthesis on this turn's SEQUENTIAL worker (one segment at
+    a time, in order) and ship it as a later `segment_audio` frame (one per seq, possibly
+    null). Text never waits on Kokoro. Shared by the session and /chat turn pipelines.
+    Caller must call `end_tts_turn(turn_id)` once all of the turn's segments are sent."""
     display = strip_display_markers(sentence)           # keep newlines/spacing for markdown
     await send({"type": "segment", "seq": seq, "turn_id": turn_id, "text": display})
     logger.debug("SEGMENT text seq=%s len=%s", seq, len(display))
     if tts:
-        t = asyncio.create_task(_tts_segment(send, seq, display, turn_id, voice))
-        _bg_tts_tasks.add(t)
-        t.add_done_callback(_bg_tts_tasks.discard)
-        if tts_tasks is not None:
-            tts_tasks.append(t)
+        if turn_id not in _tts_turn_queues:
+            _tts_turn_queues[turn_id] = asyncio.Queue()
+            _tts_turn_workers[turn_id] = asyncio.create_task(_tts_turn_worker(turn_id))
+        await _tts_turn_queues[turn_id].put((send, seq, display, voice))
 
 
 # ===========================================================================
@@ -2608,7 +2652,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         chat = await chat_service.get_chat_by_id(db, chat_id)
         if not chat:
             await send({"type": "error", "message": "Session not found.", "recoverable": False})
-            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            await send_turn_end(send, turn_id, None, "")
             return
 
         if saved_user_text is not None:
@@ -3369,7 +3413,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         appt_id, (_role.name if _role is not None else "single"), clean[:600])
         if not clean or "[Error:" in complete:
             await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
-            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            await send_turn_end(send, turn_id, None, "")
             # Even with no closing text, if the lesson was ended this turn the student must
             # still be taken to the report.
             await _open_report_if_ended(send, chat_id, _pending_ended_appt)
@@ -3400,7 +3444,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             logger.warning("Credit/XP update failed for user %s", user_id)
         await db.commit()
 
-    await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+    await send_turn_end(send, turn_id, message_id, clean)
 
     # The closing message has now fully streamed — NOW open the report (deferred navigation).
     await _open_report_if_ended(send, chat_id, _pending_ended_appt)

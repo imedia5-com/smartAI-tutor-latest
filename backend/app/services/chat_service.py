@@ -428,7 +428,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
         chat = await get_chat_by_id(db, chat_id)
         if not chat:
             await send({"type": "error", "message": "Chat not found.", "recoverable": False})
-            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            await _sa.send_turn_end(send, turn_id, None, "")
             return
 
         if saved_user_text is not None:
@@ -514,7 +514,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
         clean = _sa.strip_display_markers(complete).strip()
         if not clean or "[Error:" in complete:
             await send({"type": "error", "message": "Couldn't generate a reply — please try again.", "recoverable": True})
-            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            await _sa.send_turn_end(send, turn_id, None, "")
             return
 
         if thinking_steps:
@@ -544,7 +544,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
             logger.warning("Chat credit/XP/title update failed for user %s", user_id)
         await db.commit()
 
-    await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+    await _sa.send_turn_end(send, turn_id, message_id, clean)
 
 
 async def _handle_chat_message(send, chat_id, user_id, data):
