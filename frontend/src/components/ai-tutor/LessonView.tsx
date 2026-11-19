@@ -10,11 +10,16 @@ import type { AiTutorSession } from "../../services/api";
 // One colour per step dot, cycling — a plain grey progress bar reads as "admin dashboard";
 // this reads as "lesson". Picked from the app's own semantic tokens, not new colours.
 const STEP_DOT_COLORS = ["bg-brand", "bg-success", "bg-warning", "bg-danger"];
+const VOICE_ENABLED_KEY = "ai_tutor_voice_enabled";
 
 export default function LessonView({ session, onSessionChange }: {
   session: AiTutorSession; onSessionChange: (s: AiTutorSession) => void;
 }) {
-  const { step, stepError, revealedCount, retryStep } = useLessonPlayback(session, onSessionChange);
+  const [voiceEnabled, setVoiceEnabled] = useState(() => localStorage.getItem(VOICE_ENABLED_KEY) !== "false");
+  useEffect(() => { localStorage.setItem(VOICE_ENABLED_KEY, String(voiceEnabled)); }, [voiceEnabled]);
+
+  const { step, stepError, revealedCount, retryStep, voiceBlocked, retrySpeech } =
+    useLessonPlayback(session, onSessionChange, voiceEnabled);
 
   const totalSteps = session.outline?.length ?? 0;
   const stepIndex = session.current_step_index ?? 0;
@@ -86,7 +91,13 @@ export default function LessonView({ session, onSessionChange }: {
             },
             {
               id: "chat", label: "Chat", minPct: 22,
-              content: <ChatPane session={session} onSessionChange={onSessionChange} step={step} revealedCount={revealedCount} />,
+              content: (
+                <ChatPane
+                  session={session} onSessionChange={onSessionChange} step={step} revealedCount={revealedCount}
+                  voiceEnabled={voiceEnabled} onVoiceEnabledChange={setVoiceEnabled}
+                  voiceBlocked={voiceBlocked} onRetrySpeech={retrySpeech}
+                />
+              ),
             },
           ]}
         />

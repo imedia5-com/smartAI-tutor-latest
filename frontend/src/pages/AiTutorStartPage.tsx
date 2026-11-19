@@ -5,6 +5,7 @@ import { PageHeader, Card, Button, Alert, Textarea } from "../components/ui";
 import { cn } from "../components/ui/cn";
 import MicButton from "../components/ai-tutor/MicButton";
 import MyLessonsList from "../components/ai-tutor/MyLessonsList";
+import { primeSpeech } from "../components/ai-tutor/speech";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { aiTutorApi, type AiTutorInputType, type AiTutorLevel, type AiTutorMode } from "../services/api";
 
@@ -84,6 +85,7 @@ export default function AiTutorStartPage() {
 
   const handleGenerate = async () => {
     if (!canGenerate || submitting) return;
+    primeSpeech(); // register this click as the user gesture that unlocks speechSynthesis
     setSubmitting(true);
     setError(null);
     try {

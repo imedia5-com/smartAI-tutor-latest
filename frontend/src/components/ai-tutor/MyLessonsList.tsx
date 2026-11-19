@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FileText, Mic, Keyboard, FileType2 } from "lucide-react";
 import { Badge, Card, Spinner } from "../ui";
 import { aiTutorApi, type AiTutorSessionSummary, type AiTutorStatus } from "../../services/api";
+import { primeSpeech } from "./speech";
 
 const TYPE_ICON = { pdf: FileText, voice: Mic, text: Keyboard, word: FileType2 } as const;
 
@@ -45,7 +46,7 @@ export default function MyLessonsList() {
           return (
             <Card
               key={s.id}
-              onClick={() => navigate(`/ai-tutor/${s.id}`)}
+              onClick={() => { primeSpeech(); navigate(`/ai-tutor/${s.id}`); }}
               className="p-3.5 min-w-[220px] max-w-[220px] cursor-pointer hover:bg-surface-hover transition-colors shrink-0"
             >
               <div className="flex items-center justify-between mb-1.5">

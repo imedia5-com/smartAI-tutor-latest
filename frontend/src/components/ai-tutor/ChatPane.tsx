@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Pause, Play, Send, AlertCircle } from "lucide-react";
+import { Pause, Play, Send, AlertCircle, Volume2, VolumeX, Ear } from "lucide-react";
 import { Button, Spinner } from "../ui";
 import { normalizeMathText } from "../../lib/mathText";
 import { aiTutorApi, type AiTutorMessage, type AiTutorSegment, type AiTutorSession, type AiTutorStep } from "../../services/api";
+import { pauseSpeaking, resumeSpeaking, speak, stopSpeaking } from "./speech";
 
 function Bubble({ role, children, muted }: { role: "user" | "assistant"; children: React.ReactNode; muted?: boolean }) {
   const isUser = role === "user";
@@ -24,8 +25,10 @@ function Bubble({ role, children, muted }: { role: "user" | "assistant"; childre
 
 export default function ChatPane({
   session, onSessionChange, step, revealedCount,
+  voiceEnabled, onVoiceEnabledChange, voiceBlocked, onRetrySpeech,
 }: {
   session: AiTutorSession; onSessionChange: (s: AiTutorSession) => void; step: AiTutorStep | null; revealedCount: number;
+  voiceEnabled: boolean; onVoiceEnabledChange: (v: boolean) => void; voiceBlocked: boolean; onRetrySpeech: () => void;
 }) {
   const [messages, setMessages] = useState<AiTutorMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -33,6 +36,7 @@ export default function ChatPane({
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSpokenMessageIdRef = useRef<number | null>(null);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -46,9 +50,20 @@ export default function ChatPane({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, revealedCount]);
 
+  // Speak freshly-arrived assistant answers (Q&A), but never re-speak on a plain reload/refresh.
+  useEffect(() => {
+    if (!voiceEnabled) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant") return;
+    if (lastSpokenMessageIdRef.current === last.id) return;
+    lastSpokenMessageIdRef.current = last.id;
+    speak(last.content);
+  }, [messages, voiceEnabled]);
+
   const handleSend = async () => {
     const content = draft.trim();
     if (!content || sending) return;
+    stopSpeaking(); // the learner asking a question interrupts whatever the teacher was saying
     setSending(true);
     setSendError(null);
     setDraft("");
@@ -68,8 +83,15 @@ export default function ChatPane({
   const togglePause = async () => {
     setActionBusy(true);
     try {
-      const updated = session.status === "teaching" ? await aiTutorApi.pause(session.id) : await aiTutorApi.resume(session.id);
-      onSessionChange(updated);
+      if (session.status === "teaching") {
+        pauseSpeaking();
+        const updated = await aiTutorApi.pause(session.id);
+        onSessionChange(updated);
+      } else {
+        const updated = await aiTutorApi.resume(session.id);
+        onSessionChange(updated);
+        resumeSpeaking();
+      }
     } catch { /* ignore — a stale control is harmless */ }
     finally { setActionBusy(false); }
   };
@@ -81,13 +103,37 @@ export default function ChatPane({
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-line shrink-0">
         <div className="text-[12px] font-bold text-ink-muted uppercase tracking-wide">Chat</div>
-        {canTogglePause && (
-          <Button size="sm" variant="secondary" loading={actionBusy} onClick={togglePause}
-            leftIcon={session.status === "teaching" ? <Pause size={14} /> : <Play size={14} />}>
-            {session.status === "teaching" ? "Pause" : session.pause_reason === "question" ? "Continue lesson" : "Resume"}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onVoiceEnabledChange(!voiceEnabled)}
+            aria-label={voiceEnabled ? "Turn off the teacher's voice" : "Turn on the teacher's voice"}
+            aria-pressed={voiceEnabled}
+            title={voiceEnabled ? "Teacher's voice is on" : "Teacher's voice is off"}
+            className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${voiceEnabled ? "bg-brand-light text-brand" : "bg-surface-muted text-ink-muted"}`}
+          >
+            {voiceEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+          </button>
+          {canTogglePause && (
+            <Button size="sm" variant="secondary" loading={actionBusy} onClick={togglePause}
+              leftIcon={session.status === "teaching" ? <Pause size={14} /> : <Play size={14} />}>
+              {session.status === "teaching" ? "Pause" : session.pause_reason === "question" ? "Continue lesson" : "Resume"}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {voiceEnabled && voiceBlocked && (
+        <div className="px-3 py-2 border-b border-line bg-warning-light">
+          <button
+            type="button"
+            onClick={onRetrySpeech}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-warning"
+          >
+            <Ear size={14} /> Tap to hear the teacher
+          </button>
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3" aria-live="polite">
         {narrationSegments.map((seg) => (
