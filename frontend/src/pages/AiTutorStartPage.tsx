@@ -5,6 +5,7 @@ import { PageHeader, Card, Button, Alert, Textarea } from "../components/ui";
 import { cn } from "../components/ui/cn";
 import MicButton from "../components/ai-tutor/MicButton";
 import MyLessonsList from "../components/ai-tutor/MyLessonsList";
+import Mascot from "../components/ai-tutor/Mascot";
 import { primeSpeech } from "../components/ai-tutor/speech";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { aiTutorApi, type AiTutorInputType, type AiTutorLevel, type AiTutorMode } from "../services/api";
@@ -106,7 +107,10 @@ export default function AiTutorStartPage() {
   return (
     <div className="main-content">
       <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
-        <PageHeader title="AI Tutor" subtitle="Upload material or ask a question, and get a lesson taught just for you." />
+        <div className="flex items-center gap-3 mb-6">
+          <Mascot size="md" />
+          <PageHeader title="AI Tutor" subtitle="Upload material or ask a question, and get a lesson taught just for you." className="mb-0" />
+        </div>
 
         {error && <Alert tone="danger" className="mb-5">{error}</Alert>}
 
