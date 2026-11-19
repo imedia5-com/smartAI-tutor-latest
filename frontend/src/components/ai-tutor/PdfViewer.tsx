@@ -40,6 +40,7 @@ export default function PdfViewer({ fileUrl, targetPage, highlightQuote }: {
   const textLayerRef = useRef<HTMLDivElement>(null);
   const layerInfoRef = useRef<{ textDivs: HTMLElement[]; textContentItemsStr: string[] } | null>(null);
   const highlightedRef = useRef<HTMLElement[]>([]);
+  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
 
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState(0);
@@ -97,7 +98,15 @@ export default function PdfViewer({ fileUrl, targetPage, highlightQuote }: {
         canvas.height = viewport.height;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        await pageProxy.render({ canvasContext: ctx, viewport }).promise;
+
+        // A pending render task on this same canvas (e.g. from a rapid page/step change that
+        // re-ran this effect before the previous render finished) must be cancelled first —
+        // pdf.js refuses to start a second render on a canvas that already has one in flight.
+        renderTaskRef.current?.cancel();
+        const renderTask = pageProxy.render({ canvasContext: ctx, viewport });
+        renderTaskRef.current = renderTask;
+        await renderTask.promise;
+        if (renderTaskRef.current === renderTask) renderTaskRef.current = null;
         if (cancelled) return;
 
         const textLayerDiv = textLayerRef.current;
@@ -114,10 +123,17 @@ export default function PdfViewer({ fileUrl, targetPage, highlightQuote }: {
         layerInfoRef.current = { textDivs: textLayer.textDivs, textContentItemsStr: textLayer.textContentItemsStr };
         applyHighlight();
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't render this page.");
+        // A cancelled render task rejects its promise by design — not a real error.
+        if (!cancelled && e instanceof Error && e.name !== "RenderingCancelledException") {
+          setError(e.message || "Couldn't render this page.");
+        }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      renderTaskRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, page]);
 
