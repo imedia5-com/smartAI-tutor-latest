@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Sparkles } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Button, Alert } from "../components/ui";
 import { aiTutorApi, type AiTutorSession } from "../services/api";
 import LessonView from "../components/ai-tutor/LessonView";
+import Mascot from "../components/ai-tutor/Mascot";
 
 const POLL_DELAYS = [800, 1200, 1800, 2500, 3500]; // ms, backs off then holds at the last value
 
@@ -94,7 +95,7 @@ export default function AiTutorLessonPage() {
         <div className="dashboard-content flex items-center justify-center" style={{ padding: "24px 28px", minHeight: "60vh" }}>
           <div className="flex flex-col items-center text-center max-w-sm">
             <div className="relative mb-4">
-              <Sparkles size={40} className="text-brand animate-pulse" />
+              <Mascot size="lg" />
             </div>
             <div className="font-bold text-ink text-[16px]">
               {session?.status === "processing" ? "Reading your material…" : "Getting ready…"}

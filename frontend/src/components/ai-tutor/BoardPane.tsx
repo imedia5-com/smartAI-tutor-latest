@@ -1,6 +1,21 @@
 import { useMemo } from "react";
+import { PenLine } from "lucide-react";
 import { KaTeX } from "../../lib/mathRender";
 import type { AiTutorBoardBlock, AiTutorSegment, AiTutorStep } from "../../services/api";
+
+function WritingPlaceholder() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-10">
+      <style>{`
+        @keyframes ai-tutor-pencil-write { 0%,100% { transform: translate(0,0) rotate(-8deg); } 50% { transform: translate(3px,-2px) rotate(-14deg); } }
+        .ai-tutor-pencil { animation: ai-tutor-pencil-write 1s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .ai-tutor-pencil { animation: none; } }
+      `}</style>
+      <PenLine size={22} className="text-success ai-tutor-pencil mb-2" />
+      <div className="text-[13.5px] text-ink-muted italic">Your teacher is writing…</div>
+    </div>
+  );
+}
 
 function Block({ block }: { block: AiTutorBoardBlock }) {
   switch (block.type) {
@@ -58,9 +73,9 @@ export default function BoardPane({ step, revealedCount }: { step: AiTutorStep |
   if (!step || step.status !== "ready" || !step.content) {
     return (
       <div className="flex-1 flex items-center justify-center text-center p-8">
-        <div className="text-[13px] text-ink-muted">
-          {step?.status === "generating" ? "Writing on the board…" : "The board will appear here."}
-        </div>
+        {step?.status === "generating" ? <WritingPlaceholder /> : (
+          <div className="text-[13px] text-ink-muted">The board will appear here.</div>
+        )}
       </div>
     );
   }
@@ -72,7 +87,7 @@ export default function BoardPane({ step, revealedCount }: { step: AiTutorStep |
       <div className="max-w-2xl mx-auto bg-surface border border-line rounded-2xl shadow-sm p-7 min-h-[70%]">
         <div className="text-[12px] font-bold uppercase tracking-wide text-ink-muted mb-3">{step.title}</div>
         {visibleBlocks.length === 0 ? (
-          <div className="text-[14px] text-ink-muted italic">…</div>
+          <WritingPlaceholder />
         ) : (
           visibleBlocks.map((b) => <Block key={b.id} block={b} />)
         )}

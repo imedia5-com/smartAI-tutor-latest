@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { FileText, Presentation, MessageCircle } from "lucide-react";
 import ResizablePanels from "../ResizablePanels";
 import MaterialPane from "./MaterialPane";
 import BoardPane from "./BoardPane";
 import ChatPane from "./ChatPane";
+import PaneShell from "./PaneShell";
+import Mascot from "./Mascot";
 import { useLessonPlayback } from "./useLessonPlayback";
 import { Alert, Button } from "../ui";
 import type { AiTutorSession } from "../../services/api";
@@ -42,8 +45,9 @@ export default function LessonView({ session, onSessionChange }: {
     <div className="main-content" style={{ display: "flex", flexDirection: "column", position: "relative" }}>
       {celebrate && (
         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none animate-fade-in">
-          <div className="bg-surface border border-line rounded-2xl shadow-lg px-8 py-6 text-center">
-            <div className="text-[40px] leading-none mb-2">🎉</div>
+          <div className="bg-surface border border-line rounded-2xl shadow-lg px-8 py-6 text-center flex flex-col items-center">
+            <Mascot size="lg" />
+            <div className="text-[28px] leading-none my-2">🎉</div>
             <div className="text-[17px] font-extrabold text-ink">Nice work — lesson complete!</div>
             <div className="text-[13.5px] text-ink-muted mt-1">Ask me anything else about it below.</div>
           </div>
@@ -83,20 +87,30 @@ export default function LessonView({ session, onSessionChange }: {
           panels={[
             {
               id: "material", label: "Material", minPct: 18,
-              content: <MaterialPane session={session} step={step} revealedCount={revealedCount} />,
+              content: (
+                <PaneShell tone="brand" icon={FileText} title="Material">
+                  <MaterialPane session={session} step={step} revealedCount={revealedCount} />
+                </PaneShell>
+              ),
             },
             {
               id: "board", label: "Board", minPct: 18,
-              content: <BoardPane step={step} revealedCount={revealedCount} />,
+              content: (
+                <PaneShell tone="success" icon={Presentation} title="Board">
+                  <BoardPane step={step} revealedCount={revealedCount} />
+                </PaneShell>
+              ),
             },
             {
               id: "chat", label: "Chat", minPct: 22,
               content: (
-                <ChatPane
-                  session={session} onSessionChange={onSessionChange} step={step} revealedCount={revealedCount}
-                  voiceEnabled={voiceEnabled} onVoiceEnabledChange={setVoiceEnabled}
-                  voiceBlocked={voiceBlocked} onRetrySpeech={retrySpeech}
-                />
+                <PaneShell tone="warning" icon={MessageCircle} title="Chat">
+                  <ChatPane
+                    session={session} onSessionChange={onSessionChange} step={step} revealedCount={revealedCount}
+                    voiceEnabled={voiceEnabled} onVoiceEnabledChange={setVoiceEnabled}
+                    voiceBlocked={voiceBlocked} onRetrySpeech={retrySpeech}
+                  />
+                </PaneShell>
               ),
             },
           ]}
