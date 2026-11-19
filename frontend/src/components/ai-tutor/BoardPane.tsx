@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { PenLine } from "lucide-react";
+import { MessageCircle, PenLine } from "lucide-react";
 import { KaTeX } from "../../lib/mathRender";
-import type { AiTutorBoardBlock, AiTutorSegment, AiTutorStep } from "../../services/api";
+import type { AiTutorBoardBlock, AiTutorMode, AiTutorSegment, AiTutorStep } from "../../services/api";
 
 function WritingPlaceholder() {
   return (
@@ -62,7 +62,9 @@ function Block({ block }: { block: AiTutorBoardBlock }) {
   }
 }
 
-export default function BoardPane({ step, revealedCount }: { step: AiTutorStep | null; revealedCount: number }) {
+export default function BoardPane({ step, revealedCount, mode }: {
+  step: AiTutorStep | null; revealedCount: number; mode?: AiTutorMode;
+}) {
   const visibleBlockIds = useMemo(() => {
     const segments: AiTutorSegment[] = step?.content?.segments ?? [];
     const ids = new Set<string>();
@@ -71,11 +73,19 @@ export default function BoardPane({ step, revealedCount }: { step: AiTutorStep |
   }, [step, revealedCount]);
 
   if (!step || step.status !== "ready" || !step.content) {
+    if (step?.status === "generating") {
+      return <div className="flex-1 flex items-center justify-center text-center p-8"><WritingPlaceholder /></div>;
+    }
+    // "Just answer my questions" mode never teaches step-by-step, so there's no board content —
+    // say so clearly instead of implying something is still coming.
     return (
-      <div className="flex-1 flex items-center justify-center text-center p-8">
-        {step?.status === "generating" ? <WritingPlaceholder /> : (
-          <div className="text-[13px] text-ink-muted">The board will appear here.</div>
-        )}
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+        <MessageCircle size={22} className="text-ink-muted mb-2" />
+        <div className="text-[13px] text-ink-muted max-w-[220px]">
+          {mode === "qa_only"
+            ? "This mode just answers your questions — no whiteboard here. Ask away in the chat!"
+            : "The board will appear here."}
+        </div>
       </div>
     );
   }
