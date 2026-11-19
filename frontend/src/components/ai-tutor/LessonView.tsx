@@ -97,7 +97,7 @@ export default function LessonView({ session, onSessionChange }: {
               id: "board", label: "Board", minPct: 18,
               content: (
                 <PaneShell tone="success" icon={Presentation} title="Board">
-                  <BoardPane step={step} revealedCount={revealedCount} />
+                  <BoardPane step={step} revealedCount={revealedCount} mode={session.mode} />
                 </PaneShell>
               ),
             },

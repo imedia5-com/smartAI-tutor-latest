@@ -60,7 +60,9 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => loadVoices();
 }
 
-/** Strip markdown and LaTeX so speech doesn't read out symbols like "asterisk" or "dollar sign". */
+/** Strip markdown, LaTeX, and emoji so speech doesn't read out symbols like "asterisk" or try to
+ * pronounce a pictograph ("sun emoji", "party popper"...) — those are for the chat bubble, not
+ * the teacher's voice. */
 export function toSpeechText(raw: string): string {
   let t = raw || "";
   t = t.replace(/\$\$[\s\S]*?\$\$/g, " ");
@@ -72,6 +74,9 @@ export function toSpeechText(raw: string): string {
   t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");
   t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
   t = t.replace(/[*_#>~]+/g, "");
+  t = t.replace(/\p{Extended_Pictographic}/gu, "");
+  t = t.replace(/[‍️]/g, ""); // zero-width joiner / emoji variation selector
+  t = t.replace(/[\u{1F1E6}-\u{1F1FF}]/gu, ""); // regional-indicator flag letters
   t = t.replace(/\s+/g, " ").trim();
   return t;
 }
