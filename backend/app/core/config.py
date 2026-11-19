@@ -101,6 +101,13 @@ class Settings(BaseSettings):
 
     max_appointments_per_week: int = 100
 
+    # AI Tutor feature (upload-your-own-material lessons) — reuses the Gemini-powered
+    # session model/client above.
+    ai_tutor_max_upload_mb: int = 25
+    ai_tutor_max_files: int = 5
+    ai_tutor_max_pdf_pages: int = 200
+    ai_tutor_upload_dir: str = "uploads/ai_tutor"
+
     @property
     def database_url(self) -> str:
         return (

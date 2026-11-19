@@ -17,6 +17,8 @@ import AssignmentsPage from "./pages/AssignmentsPage";
 import SettingsPage from "./pages/SettingsPage";
 import StudentPreferencesPage from "./pages/StudentPreferencesPage";
 import LessonSetupPage from "./pages/LessonSetupPage";
+import AiTutorStartPage from "./pages/AiTutorStartPage";
+import AiTutorLessonPage from "./pages/AiTutorLessonPage";
 import ParentReportsPage from "./pages/ParentReportsPage";
 import ParentSettingsPage from "./pages/ParentSettingsPage";
 import TeacherReportsPage from "./pages/TeacherReportsPage";
@@ -161,6 +163,8 @@ export default function App() {
             <Route path="/settings" element={<ProtectedRoute allowedRoles={["student"]}><SettingsPage /></ProtectedRoute>} />
             <Route path="/preferences" element={<ProtectedRoute allowedRoles={["student"]}><StudentPreferencesPage /></ProtectedRoute>} />
             <Route path="/lesson/setup" element={<ProtectedRoute allowedRoles={["student"]}><LessonSetupPage /></ProtectedRoute>} />
+            <Route path="/ai-tutor" element={<ProtectedRoute allowedRoles={["student"]}><AiTutorStartPage /></ProtectedRoute>} />
+            <Route path="/ai-tutor/:id" element={<ProtectedRoute allowedRoles={["student"]}><AiTutorLessonPage /></ProtectedRoute>} />
             <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           </Route>

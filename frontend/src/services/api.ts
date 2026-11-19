@@ -1354,3 +1354,216 @@ export const schoolVerificationApi = {
   async application(id: number) { return handleResponse<{ school: SchoolVerification; events: VerificationEvent[]; evidence: EvidenceDoc[]; duplicate_warnings: string[] }>(await fetch(`${API_BASE}/school-verification/applications/${id}`, { headers: authHeaders() })); },
   async transition(id: number, to_status: string, note?: string) { return handleResponse<{ status: string }>(await fetch(`${API_BASE}/school-verification/applications/${id}/transition`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ to_status, note }) })); },
 };
+
+/* ───────────────────────────  AI Tutor  ─────────────────────────── */
+
+export type AiTutorInputType = "pdf" | "word" | "voice" | "text";
+export type AiTutorLevel = "low" | "medium" | "high";
+export type AiTutorMode = "guided" | "qa_only";
+export type AiTutorStatus = "draft" | "processing" | "ready" | "teaching" | "paused" | "qa" | "failed";
+
+export interface AiTutorSource {
+  id: number;
+  name: string;
+  file_type: string | null;
+  status: string;
+  error_message: string | null;
+  pages: { page: number; text: string }[] | null;
+}
+
+export interface AiTutorOutlineStep {
+  title: string;
+  summary: string;
+  source_refs: { source_id: string; page: number }[];
+}
+
+export interface AiTutorSession {
+  id: number;
+  input_type: AiTutorInputType;
+  level: AiTutorLevel;
+  mode: AiTutorMode;
+  status: AiTutorStatus;
+  pause_reason: "user" | "question" | null;
+  title: string | null;
+  question_text: string | null;
+  current_step_index: number | null;
+  resume_segment_index: number | null;
+  outline: AiTutorOutlineStep[] | null;
+  warnings: string[];
+  error_message: string | null;
+  sources: AiTutorSource[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiTutorSessionSummary {
+  id: number;
+  input_type: AiTutorInputType;
+  level: AiTutorLevel;
+  mode: AiTutorMode;
+  status: AiTutorStatus;
+  title: string | null;
+  current_step_index: number | null;
+  total_steps: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiTutorBoardBlock {
+  id: string;
+  type: "heading" | "text" | "bullets" | "steps" | "key_term" | "formula" | "code" | "callout";
+  content?: string;
+  items?: string[];
+}
+
+export interface AiTutorHighlight {
+  id: string;
+  source_id: string;
+  page: number;
+  quote: string;
+  note?: string;
+  verified?: boolean;
+}
+
+export interface AiTutorSegment {
+  id: string;
+  text: string;
+  board_block_ids: string[];
+  highlight_ids: string[];
+}
+
+export interface AiTutorStepContent {
+  segments: AiTutorSegment[];
+  board: AiTutorBoardBlock[];
+  highlights: AiTutorHighlight[];
+  check_question?: { question: string; answer?: string } | null;
+  key_takeaway?: string;
+}
+
+export interface AiTutorStep {
+  step_index: number;
+  title: string;
+  status: string;
+  level: string | null;
+  content: AiTutorStepContent | null;
+  error_message: string | null;
+}
+
+export interface AiTutorMessage {
+  id: number;
+  role: "user" | "assistant" | "event";
+  content: string;
+  meta: { resume_available?: boolean; resume_step?: number | null; error?: boolean } | null;
+  created_at: string;
+}
+
+export interface AiTutorAnswer {
+  message: AiTutorMessage;
+  resume_available: boolean;
+  resume_step: number | null;
+}
+
+export const aiTutorApi = {
+  async createSession(input_type: AiTutorInputType, level: AiTutorLevel, mode: AiTutorMode) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ input_type, level, mode }),
+    });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async listSessions() {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions`, { headers: authHeaders() });
+    return handleResponse<AiTutorSessionSummary[]>(res);
+  },
+
+  sourceFileUrl(sessionId: number, sourceId: number) {
+    return `${API_BASE}/ai-tutor/sessions/${sessionId}/sources/${sourceId}/file`;
+  },
+
+  async getSession(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}`, { headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async uploadSources(id: number, files: File[]) {
+    const token = localStorage.getItem("token");
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/sources`, {
+      method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form,
+    });
+    return handleResponse<AiTutorSource[]>(res);
+  },
+
+  async setQuestion(id: number, text: string, spoken: boolean) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/question`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ text, spoken }),
+    });
+    return handleResponse<AiTutorSource>(res);
+  },
+
+  async generate(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/generate`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async retry(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/retry`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async getStep(id: number, stepIndex: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/steps/${stepIndex}`, { headers: authHeaders() });
+    return handleResponse<AiTutorStep>(res);
+  },
+
+  async start(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/start`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async advance(id: number, fromIndex: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/advance`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ from_index: fromIndex }),
+    });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async goto(id: number, index: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/goto/${index}`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async pause(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/pause`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async resume(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/resume`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async skip(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/skip`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async restart(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/restart`, { method: "POST", headers: authHeaders() });
+    return handleResponse<AiTutorSession>(res);
+  },
+
+  async listMessages(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/messages`, { headers: authHeaders() });
+    return handleResponse<AiTutorMessage[]>(res);
+  },
+
+  async sendMessage(id: number, content: string, revealedSegments?: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}/messages`, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ content, revealed_segments: revealedSegments ?? null }),
+    });
+    return handleResponse<AiTutorAnswer>(res);
+  },
+};

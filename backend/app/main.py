@@ -21,6 +21,7 @@ from app.routers import legal, school_verification
 from app.routers import parent_settings, teacher_settings, admin_settings, billing, school_billing
 from app.routers import notifications as notifications_router
 from app.routers import observability as observability_router
+from app.routers import ai_tutor
 
 # Structured logs carry the request id so a single failing request is traceable end-to-end.
 logging.basicConfig(
@@ -156,3 +157,4 @@ app.include_router(billing.router)
 app.include_router(school_billing.router)
 app.include_router(notifications_router.router)
 app.include_router(observability_router.router)
+app.include_router(ai_tutor.router)

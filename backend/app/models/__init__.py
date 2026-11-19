@@ -28,6 +28,7 @@ from app.models.resource_hub import (
 )
 from app.models.legal import LegalDocument, LegalAcceptance, DataRequest
 from app.models.school_verification import SchoolVerificationEvent, SchoolVerificationDocument
+from app.models.ai_tutor import AiTutorSession, AiTutorSource, AiTutorStep, AiTutorMessage
 
 __all__ = [
     "LegalDocument", "LegalAcceptance", "DataRequest",
@@ -51,4 +52,5 @@ __all__ = [
     "Homework", "HomeworkAssignment",
     "RHKeyStage", "RHYearGroup", "RHSubject", "RHUnit", "RHTopic",
     "RHAvailability", "RHResource", "RHDocument", "RHDocumentChunk",
+    "AiTutorSession", "AiTutorSource", "AiTutorStep", "AiTutorMessage",
 ]
