@@ -144,6 +144,11 @@ async def list_sessions(db: AsyncSession, user_id: int) -> list[AiTutorSession]:
     return list(result.scalars().all())
 
 
+async def delete_session(db: AsyncSession, session: AiTutorSession) -> None:
+    await db.delete(session)
+    await db.flush()
+
+
 def find_source(session: AiTutorSession, source_id: int) -> AiTutorSource:
     for source in session.sources:
         if source.id == source_id:

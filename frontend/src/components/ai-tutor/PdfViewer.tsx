@@ -2,14 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-// Vite's `?url` suffix guarantees this is bundled as a static asset and resolved to the final
-// build URL at import time — `new URL(bareSpecifier, import.meta.url)` isn't reliably rewritten
-// by Vite's build analysis for a bare node_modules specifier (worked in dev, broke in prod).
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Spinner } from "../ui";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// Served as a stable static file (public/pdf.worker.min.mjs, copied from pdfjs-dist at the
+// same version) rather than a Vite-bundled/hashed asset — avoids any build-time asset-URL
+// rewriting or CDN/caching edge cases for this one file.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 /** Find which text-layer item indices a (normalised) quote spans, so only those exact
  * DOM spans get highlighted. Returns null if the quote can't be located on this page. */
