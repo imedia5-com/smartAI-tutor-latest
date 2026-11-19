@@ -284,9 +284,11 @@ async def greet_back(*, message: str, lesson_topic: str, level: str) -> str:
         "The learner just sent a greeting or small talk, not a real question. Reply like a warm, "
         "friendly human teacher: 1-2 short, cheerful sentences that respond naturally to what "
         "they said (e.g. if they said thanks, acknowledge it; if they asked how you are, answer "
-        "briefly), then gently invite them back to the lesson by name. Never explain what the "
-        "greeting word itself means. At most one emoji. Reply in the same language they used. "
-        "Keep it to 1-2 short lines — no need for bullets or bold here, just a quick, warm reply."
+        "briefly), then gently invite them back to the lesson topic. You don't know the learner's "
+        "name, so don't address them by name or use a placeholder like \"[Learner Name]\" — just "
+        "talk to them directly. Never explain what the greeting word itself means. At most one "
+        "emoji. Reply in the same language they used. Keep it to 1-2 short lines — no need for "
+        "bullets or bold here, just a quick, warm reply."
     )
     prompt = f'Lesson topic: "{lesson_topic}"\nLearner said: "{message}"'
 
