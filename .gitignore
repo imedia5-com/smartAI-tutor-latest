@@ -19,6 +19,8 @@ Thumbs.db
 *.db
 frontend/dist/
 frontend/build/
+# Auto-copied from pdfjs-dist by the pre{dev,build} npm scripts — not source.
+frontend/public/pdf.worker.min.mjs
 backend/uploads/
 .pytest_cache/
 .mypy_cache/

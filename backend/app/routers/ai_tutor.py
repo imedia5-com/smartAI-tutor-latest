@@ -70,6 +70,14 @@ async def get_session(session: AiTutorSession = Depends(_get_session)):
     return session
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session: AiTutorSession = Depends(_get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    await ai_tutor_service.delete_session(db, session)
+
+
 @router.get("/sessions/{session_id}/sources/{source_id}/file")
 async def get_source_file(
     source_id: int,

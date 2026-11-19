@@ -1485,6 +1485,11 @@ export const aiTutorApi = {
     return handleResponse<AiTutorSession>(res);
   },
 
+  async deleteSession(id: number) {
+    const res = await fetch(`${API_BASE}/ai-tutor/sessions/${id}`, { method: "DELETE", headers: authHeaders() });
+    if (!res.ok) throw new Error("Couldn't delete this lesson.");
+  },
+
   async uploadSources(id: number, files: File[]) {
     const token = localStorage.getItem("token");
     const form = new FormData();
