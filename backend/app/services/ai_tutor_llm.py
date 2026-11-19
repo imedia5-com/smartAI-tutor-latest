@@ -172,13 +172,25 @@ async def generate_step(
 
 
 async def answer_question(
-    *, question: str, context: str, history: list[dict], level: str,
+    *, question: str, context: str, history: list[dict], level: str, is_topic_only: bool = False,
 ) -> str:
+    if is_topic_only:
+        # text/voice sessions: the "source" is just the learner's question, not reference
+        # material — the question IS the topic to teach, same as a guided lesson step would.
+        grounding = (
+            "The learner is asking about a topic rather than providing a document — there is no "
+            "separate reference material; the question itself is the topic. Teach and answer it "
+            "from your own general knowledge, exactly as you would when writing a lesson step. "
+            "Never ask the learner to provide a document or more material."
+        )
+    else:
+        grounding = (
+            "Answer the learner's question using only the material and context given to you. If "
+            "the material doesn't cover something, say so rather than guessing."
+        )
     system = (
-        f"{_base_system(level)}\n\n"
-        "Answer the learner's question using only the material and context given to you. If "
-        "the material doesn't cover something, say so rather than guessing. Keep answers "
-        "focused; use markdown and LaTeX ($...$) where helpful."
+        f"{_base_system(level)}\n\n{grounding} Keep answers focused; use markdown and LaTeX "
+        "($...$) where helpful."
     )
     messages = [SystemMessage(content=system)]
     for h in history:
@@ -195,4 +207,27 @@ async def answer_question(
     answer = response_text(response)
     if not answer:
         raise AiTutorLLMError("The AI tutor did not return an answer.")
+    return answer
+
+
+async def reexplain_step(*, step_title: str, step_summary: str, step_text: str, level: str) -> str:
+    """The learner signalled they didn't follow the current step — re-teach it more simply
+    rather than answering a casual/confused message ("bro", "wth") literally."""
+    system = (
+        f"{_base_system(level)}\n\n"
+        "The learner said they didn't understand the current lesson step. Re-explain it in a "
+        "SIMPLER way than before: shorter sentences, plainer words, and include one concrete, "
+        "relatable example. Do not just repeat the same wording."
+    )
+    prompt = f'Step: "{step_title}"\nSummary: {step_summary}\nOriginal explanation: {step_text}'
+
+    try:
+        response = await get_llm().ainvoke([SystemMessage(content=system), HumanMessage(content=prompt)])
+    except Exception as exc:
+        logger.error("AI Tutor: Gemini re-explain request failed: %s", exc)
+        raise AiTutorLLMError(f"The AI tutor is temporarily unavailable: {exc}") from exc
+
+    answer = response_text(response)
+    if not answer:
+        raise AiTutorLLMError("The AI tutor did not return a re-explanation.")
     return answer

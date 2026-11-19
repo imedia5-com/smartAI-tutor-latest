@@ -8,11 +8,11 @@ import MyLessonsList from "../components/ai-tutor/MyLessonsList";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { aiTutorApi, type AiTutorInputType, type AiTutorLevel, type AiTutorMode } from "../services/api";
 
-const OPTIONS: { id: AiTutorInputType; label: string; desc: string; icon: typeof FileText; accept?: string }[] = [
-  { id: "pdf", label: "PDF", desc: "Upload one or more PDF files", icon: FileText, accept: ".pdf" },
-  { id: "voice", label: "Speak", desc: "Ask your question out loud", icon: Mic },
-  { id: "text", label: "Type a question", desc: "Type or paste a question", icon: Keyboard },
-  { id: "word", label: "Word document", desc: "Upload one or more .docx files", icon: FileType2, accept: ".docx" },
+const OPTIONS: { id: AiTutorInputType; label: string; desc: string; icon: typeof FileText; accept?: string; tint: string }[] = [
+  { id: "pdf", label: "PDF", desc: "Upload one or more PDF files", icon: FileText, accept: ".pdf", tint: "bg-danger-light text-danger" },
+  { id: "voice", label: "Speak", desc: "Ask your question out loud", icon: Mic, tint: "bg-success-light text-success" },
+  { id: "text", label: "Type a question", desc: "Type or paste a question", icon: Keyboard, tint: "bg-brand-light text-brand" },
+  { id: "word", label: "Word document", desc: "Upload one or more .docx files", icon: FileType2, accept: ".docx", tint: "bg-warning-light text-warning" },
 ];
 
 const LEVELS: { id: AiTutorLevel; label: string; desc: string }[] = [
@@ -121,13 +121,15 @@ export default function AiTutorStartPage() {
                 type="button"
                 onClick={() => switchOption(opt.id)}
                 className={cn(
-                  "text-left p-4 rounded-lg border-2 transition-colors",
+                  "text-left p-4 rounded-2xl border-2 transition-colors",
                   active ? "border-brand bg-brand-light" : "border-line bg-surface hover:bg-surface-hover",
                 )}
               >
-                <Icon size={22} className={active ? "text-brand" : "text-ink-muted"} />
-                <div className="mt-2 font-bold text-[14px] text-ink">{opt.label}</div>
-                <div className="text-[12px] text-ink-muted mt-0.5">{opt.desc}</div>
+                <div className={cn("inline-flex items-center justify-center w-11 h-11 rounded-full", opt.tint)}>
+                  <Icon size={24} />
+                </div>
+                <div className="mt-2.5 font-bold text-[15px] text-ink">{opt.label}</div>
+                <div className="text-[12.5px] text-ink-muted mt-0.5">{opt.desc}</div>
               </button>
             );
           })}
@@ -141,7 +143,7 @@ export default function AiTutorStartPage() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-line rounded-lg p-8 text-center cursor-pointer hover:bg-surface-hover"
+                className="border-2 border-dashed border-line rounded-2xl p-8 text-center cursor-pointer hover:bg-surface-hover"
               >
                 <Upload size={28} className="mx-auto text-ink-muted mb-2" />
                 <div className="text-[13px] text-ink-soft">
@@ -233,7 +235,7 @@ export default function AiTutorStartPage() {
                 type="button"
                 onClick={() => setLevel(l.id)}
                 className={cn(
-                  "text-left p-3 rounded-lg border-2 transition-colors",
+                  "text-left p-3 rounded-2xl border-2 transition-colors",
                   level === l.id ? "border-brand bg-brand-light" : "border-line bg-surface hover:bg-surface-hover",
                 )}
               >
@@ -247,7 +249,7 @@ export default function AiTutorStartPage() {
         {/* Step 4: mode */}
         <div className="mb-8">
           <div className="text-[12.5px] font-semibold text-ink-soft mb-2">Mode</div>
-          <div className="inline-flex rounded-lg border border-line overflow-hidden">
+          <div className="inline-flex rounded-2xl border border-line overflow-hidden">
             <button
               type="button"
               onClick={() => setMode("guided")}

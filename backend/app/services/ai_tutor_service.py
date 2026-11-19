@@ -1,6 +1,6 @@
 """
 Business logic for the AI Tutor feature (upload your own material / ask a question,
-get a guided Claude-powered lesson or just Q&A). Reuses the existing PDF/DOCX text
+get a guided Gemini-powered lesson or just Q&A). Reuses the existing PDF/DOCX text
 extractors in document_service — this feature does not re-implement file parsing.
 """
 import logging
@@ -18,11 +18,32 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.ai_tutor import AiTutorMessage, AiTutorSession, AiTutorSource, AiTutorStep
 from app.services import document_service
-from app.services.ai_tutor_llm import AiTutorLLMError, answer_question, generate_outline, generate_step
+from app.services.ai_tutor_llm import (
+    AiTutorLLMError, answer_question, generate_outline, generate_step, reexplain_step,
+)
 
 logger = logging.getLogger(__name__)
 
 CONTEXT_CHAR_BUDGET = 12000
+
+# Short, casual, or confused mid-lesson messages ("bro", "wth", "ok i don't get it") — treated
+# as "I didn't understand", not as a literal question to answer.
+_CONFUSION_RE = re.compile(
+    r"\b(i don.?t (get|understand)|(i.?m|i am|this is|that.?s|that is) confus(ed|ing)|"
+    r"doesn.?t make sense|makes no sense|i.?m lost|lost me|no idea what|"
+    r"what.?s (going on|happening))\b",
+    re.IGNORECASE,
+)
+_CASUAL_FILLER_RE = re.compile(r"^(bro+|wth+|huh+|idk|wait what|what)[\s!?.]*$", re.IGNORECASE)
+
+
+def _is_confused_message(text: str) -> bool:
+    t = text.strip()
+    if _CASUAL_FILLER_RE.match(t):
+        return True
+    if len(t.split()) > 10:
+        return False  # longer messages read as real questions, not just confusion
+    return bool(_CONFUSION_RE.search(t))
 QUESTION_PROMPT = "Do you have any questions?"
 
 
@@ -295,21 +316,31 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
+_MIN_HIGHLIGHT_WORDS = 3
+
+
+def _word_boundary_find(haystack_lower: str, needle_lower: str) -> int:
+    """Like str.find, but only matches at whole-word boundaries — never inside another word
+    (e.g. "the" must never match inside "photosynthesis")."""
+    m = re.search(r"(?<!\w)" + re.escape(needle_lower) + r"(?!\w)", haystack_lower)
+    return m.start() if m else -1
+
+
 def _find_quote(quote: str, pages: dict[int, str], preferred_page):
     norm_quote = _normalize(quote)
-    if not norm_quote:
+    words = norm_quote.split(" ") if norm_quote else []
+    if len(words) < _MIN_HIGHLIGHT_WORDS:
         return None, None
     ordered = ([preferred_page] if preferred_page in pages else []) + [p for p in pages if p != preferred_page]
     for page in ordered:
         text = _normalize(pages[page])
         lower = text.lower()
-        idx = lower.find(norm_quote.lower())
+        idx = _word_boundary_find(lower, norm_quote.lower())
         if idx != -1:
             return page, text[idx: idx + len(norm_quote)]
-        words = norm_quote.split(" ")
-        for cut in range(len(words) - 1, 0, -1):
+        for cut in range(len(words) - 1, _MIN_HIGHLIGHT_WORDS - 1, -1):
             trimmed = " ".join(words[:cut])
-            idx = lower.find(trimmed.lower())
+            idx = _word_boundary_find(lower, trimmed.lower())
             if idx != -1:
                 return page, text[idx: idx + len(trimmed)]
     return None, None
@@ -488,6 +519,15 @@ async def ask_question(
     resume_available = False
     resume_step = None
     pinned_pages: set = set()
+    current_step = None
+
+    if session.current_step_index is not None:
+        step_result = await db.execute(
+            select(AiTutorStep).where(
+                AiTutorStep.session_id == session.id, AiTutorStep.step_index == session.current_step_index
+            )
+        )
+        current_step = step_result.scalar_one_or_none()
 
     if session.status == "teaching":
         session.status = "paused"
@@ -497,21 +537,26 @@ async def ask_question(
         # So the client can restore playback here even if the page is reloaded before resuming.
         if revealed_segments is not None:
             session.resume_segment_index = max(0, revealed_segments)
-        step_result = await db.execute(
-            select(AiTutorStep).where(
-                AiTutorStep.session_id == session.id, AiTutorStep.step_index == session.current_step_index
-            )
-        )
-        step = step_result.scalar_one_or_none()
-        if step and step.source_refs:
-            pinned_pages = {(r["source_id"], r["page"]) for r in step.source_refs}
+        if current_step and current_step.source_refs:
+            pinned_pages = {(r["source_id"], r["page"]) for r in current_step.source_refs}
 
     sources = _session_sources_payload(session)
     context = _build_context(sources, pinned_pages)
     history = await _recent_history(db, session.id)
+    is_topic_only = session.input_type in ("text", "voice")
 
     try:
-        answer = await answer_question(question=content, context=context, history=history, level=session.level)
+        if current_step and current_step.content and _is_confused_message(content):
+            segments_text = " ".join(s.get("text", "") for s in current_step.content.get("segments", []))
+            answer = await reexplain_step(
+                step_title=current_step.title, step_summary=current_step.summary or "",
+                step_text=segments_text, level=session.level,
+            )
+        else:
+            answer = await answer_question(
+                question=content, context=context, history=history, level=session.level,
+                is_topic_only=is_topic_only,
+            )
         meta = {"resume_available": resume_available, "resume_step": resume_step}
     except AiTutorLLMError as exc:
         # Answered with a friendly failure message rather than raising: raising here would
