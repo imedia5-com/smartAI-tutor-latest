@@ -14,10 +14,10 @@ export type SpeechSpeed = "slow" | "normal" | "fast";
 const SPEED_KEY = "ai_tutor_speech_speed";
 
 // Baseline rate by lesson level, then adjusted by the learner's own slow/normal/fast choice —
-// kids need a slower default than the browser's native 1.0 to actually follow along.
-const LEVEL_BASE_RATE: Record<string, number> = { low: 0.8, medium: 0.85, high: 0.95 };
+// kids need a slightly slower default than the browser's native 1.0, but not a crawl.
+const LEVEL_BASE_RATE: Record<string, number> = { low: 0.88, medium: 0.95, high: 1.0 };
 const SPEED_MULTIPLIER: Record<SpeechSpeed, number> = { slow: 0.85, normal: 1, fast: 1.15 };
-const SENTENCE_PAUSE_MS = 400;
+const SENTENCE_PAUSE_MS = 250;
 
 export function getSpeechSpeed(): SpeechSpeed {
   const v = typeof window !== "undefined" ? window.localStorage.getItem(SPEED_KEY) : null;
