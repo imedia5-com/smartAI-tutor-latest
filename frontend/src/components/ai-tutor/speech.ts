@@ -8,6 +8,44 @@
 
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 let cachedVoices: SpeechSynthesisVoice[] = [];
+let generation = 0;
+
+export type SpeechSpeed = "slow" | "normal" | "fast";
+const SPEED_KEY = "ai_tutor_speech_speed";
+
+// Baseline rate by lesson level, then adjusted by the learner's own slow/normal/fast choice —
+// kids need a slower default than the browser's native 1.0 to actually follow along.
+const LEVEL_BASE_RATE: Record<string, number> = { low: 0.8, medium: 0.85, high: 0.95 };
+const SPEED_MULTIPLIER: Record<SpeechSpeed, number> = { slow: 0.85, normal: 1, fast: 1.15 };
+const SENTENCE_PAUSE_MS = 400;
+
+export function getSpeechSpeed(): SpeechSpeed {
+  const v = typeof window !== "undefined" ? window.localStorage.getItem(SPEED_KEY) : null;
+  return v === "slow" || v === "fast" ? v : "normal";
+}
+
+export function setSpeechSpeed(speed: SpeechSpeed): void {
+  window.localStorage.setItem(SPEED_KEY, speed);
+}
+
+function computeRate(level: string): number {
+  const base = LEVEL_BASE_RATE[level] ?? LEVEL_BASE_RATE.medium;
+  const rate = base * SPEED_MULTIPLIER[getSpeechSpeed()];
+  return Math.min(1.3, Math.max(0.5, rate));
+}
+
+/** Split already-markdown-stripped text into sentence/list-item pieces so speak() can insert a
+ * short pause between them — the Web Speech API has no SSML-style pause markup of its own. */
+function splitIntoSpeechPieces(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function loadVoices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !window.speechSynthesis) return [];
@@ -76,18 +114,8 @@ export function primeSpeech(): void {
   } catch { /* best-effort only */ }
 }
 
-/**
- * Speaks text, resolving once it finishes (or fails). Cancels anything currently speaking first.
- * `ok: false` means the browser likely blocked audio (no `onstart`/`onend` within the timeout) —
- * callers should surface a "tap to hear the teacher" affordance in that case.
- */
-export function speak(rawText: string): Promise<{ ok: boolean }> {
+function speakPiece(text: string, rate: number): Promise<{ ok: boolean }> {
   return new Promise((resolve) => {
-    if (!isSpeechSupported()) { resolve({ ok: false }); return; }
-    const text = toSpeechText(rawText);
-    if (!text) { resolve({ ok: true }); return; } // nothing to say isn't a failure
-
-    window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickVoice(text);
     if (voice) {
@@ -96,7 +124,7 @@ export function speak(rawText: string): Promise<{ ok: boolean }> {
     } else {
       utter.lang = isUrduOrHindiText(text) ? "ur-PK" : "en-US";
     }
-    utter.rate = 1.0;
+    utter.rate = rate;
     utter.pitch = 1.05; // slightly warmer than the default monotone
 
     let settled = false;
@@ -133,7 +161,42 @@ export function speak(rawText: string): Promise<{ ok: boolean }> {
   });
 }
 
+/**
+ * Speaks text, resolving once it finishes (or fails). Cancels anything currently speaking first.
+ * Splits into sentences/list items with a short pause between them, and paces the rate from the
+ * lesson level plus the learner's own slow/normal/fast choice.
+ * `ok: false` means the browser likely blocked audio (no `onstart`/`onend` within the timeout) —
+ * callers should surface a "tap to hear the teacher" affordance in that case.
+ */
+export function speak(rawText: string, level: string = "medium"): Promise<{ ok: boolean }> {
+  const myGeneration = ++generation;
+  return new Promise((resolve) => {
+    if (!isSpeechSupported()) { resolve({ ok: false }); return; }
+    const text = toSpeechText(rawText);
+    if (!text) { resolve({ ok: true }); return; } // nothing to say isn't a failure
+
+    window.speechSynthesis.cancel();
+    const pieces = splitIntoSpeechPieces(text);
+    const rate = computeRate(level);
+
+    (async () => {
+      for (let i = 0; i < pieces.length; i++) {
+        if (generation !== myGeneration) { resolve({ ok: true }); return; } // interrupted, not blocked
+        const { ok } = await speakPiece(pieces[i], rate);
+        if (generation !== myGeneration) { resolve({ ok: true }); return; }
+        if (i === 0 && !ok) { resolve({ ok: false }); return; } // first piece blocked = real failure
+        if (i < pieces.length - 1) {
+          await delay(SENTENCE_PAUSE_MS);
+          if (generation !== myGeneration) { resolve({ ok: true }); return; }
+        }
+      }
+      resolve({ ok: true });
+    })();
+  });
+}
+
 export function stopSpeaking(): void {
+  generation++;
   currentUtterance = null;
   if (isSpeechSupported()) window.speechSynthesis.cancel();
 }

@@ -79,7 +79,7 @@ export function useLessonPlayback(
 
     if (voiceEnabled && isSpeechSupported()) {
       speakingRef.current = true;
-      speak(text).then(({ ok }) => {
+      speak(text, session.level).then(({ ok }) => {
         speakingRef.current = false;
         if (!ok) setVoiceBlocked(true);
         setRevealedCount((c) => c + 1);

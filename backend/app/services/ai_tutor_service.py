@@ -19,7 +19,7 @@ from app.db.session import async_session_factory
 from app.models.ai_tutor import AiTutorMessage, AiTutorSession, AiTutorSource, AiTutorStep
 from app.services import document_service
 from app.services.ai_tutor_llm import (
-    AiTutorLLMError, answer_question, generate_outline, generate_step, reexplain_step,
+    AiTutorLLMError, answer_question, generate_outline, generate_step, greet_back, reexplain_step,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,27 @@ def _is_confused_message(text: str) -> bool:
     if len(t.split()) > 10:
         return False  # longer messages read as real questions, not just confusion
     return bool(_CONFUSION_RE.search(t))
+
+
+# Greetings / small talk ("hi", "yo?", "thanks", "how are you") — answered with a short, warm
+# reply that redirects to the lesson, never with a literal explanation of the greeting word.
+_GREETING_RE = re.compile(
+    r"^(hi+|hiya|hello+|hey+|yo+|sup|salam|assalam\w*|wassup|"
+    r"good\s*(morning|afternoon|evening|night)|"
+    r"how\s+are\s+you(\s+(doing|today))?|"
+    r"thanks?|thank\s*you|ty|"
+    r"bye+|goodbye|see\s*ya|take\s*care)[\s!?.,]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_greeting_message(text: str) -> bool:
+    t = text.strip()
+    if len(t.split()) > 6:
+        return False  # longer messages are real content, not just a greeting
+    return bool(_GREETING_RE.match(t))
+
+
 QUESTION_PROMPT = "Do you have any questions?"
 
 
@@ -557,6 +578,9 @@ async def ask_question(
                 step_title=current_step.title, step_summary=current_step.summary or "",
                 step_text=segments_text, level=session.level,
             )
+        elif _is_greeting_message(content):
+            lesson_topic = (current_step.title if current_step else None) or session.title or "your lesson"
+            answer = await greet_back(message=content, lesson_topic=lesson_topic, level=session.level)
         else:
             answer = await answer_question(
                 question=content, context=context, history=history, level=session.level,

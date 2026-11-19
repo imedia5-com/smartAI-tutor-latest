@@ -1,13 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Pause, Play, Send, AlertCircle, Volume2, VolumeX, Ear } from "lucide-react";
 import { Button } from "../ui";
 import Mascot from "./Mascot";
 import { normalizeMathText } from "../../lib/mathText";
 import { aiTutorApi, type AiTutorMessage, type AiTutorSegment, type AiTutorSession, type AiTutorStep } from "../../services/api";
-import { pauseSpeaking, resumeSpeaking, speak, stopSpeaking } from "./speech";
+import { getSpeechSpeed, pauseSpeaking, resumeSpeaking, setSpeechSpeed, speak, stopSpeaking, type SpeechSpeed } from "./speech";
+import { splitIntoChunks } from "./messageChunks";
 
 const QUICK_REPLIES = ["Explain again simply", "Give me an example", "Quiz me"];
+const SPEEDS: { id: SpeechSpeed; label: string }[] = [
+  { id: "slow", label: "🐢" },
+  { id: "normal", label: "Normal" },
+  { id: "fast", label: "🐇" },
+];
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function formatTime(iso: string): string {
   try {
@@ -69,8 +79,17 @@ export default function ChatPane({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [speed, setSpeed] = useState<SpeechSpeed>(() => getSpeechSpeed());
+  const [revealedChunkCounts, setRevealedChunkCounts] = useState<Record<number, number>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lastSpokenMessageIdRef = useRef<number | null>(null);
+  // Messages already shown once (on initial load, or once their own reveal finished) — anything
+  // not in this set when `messages` changes is freshly arrived and gets the bubble-by-bubble
+  // reveal + per-chunk speech; anything already in it (e.g. on a page reload) renders fully at once.
+  const seenMessageIdsRef = useRef<Set<number> | null>(null);
+  const revealingIdsRef = useRef<Set<number>>(new Set());
+  const abortedIdsRef = useRef<Set<number>>(new Set());
+  const voiceEnabledRef = useRef(voiceEnabled);
+  voiceEnabledRef.current = voiceEnabled;
 
   const loadMessages = useCallback(async () => {
     try {
@@ -82,22 +101,48 @@ export default function ChatPane({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, revealedCount]);
+  }, [messages, revealedCount, revealedChunkCounts]);
 
-  // Speak freshly-arrived assistant answers (Q&A), but never re-speak on a plain reload/refresh.
+  const revealMessage = useCallback(async (m: AiTutorMessage) => {
+    const chunks = splitIntoChunks(m.content);
+    revealingIdsRef.current.add(m.id);
+    for (let i = 0; i < chunks.length; i++) {
+      if (abortedIdsRef.current.has(m.id)) break;
+      setRevealedChunkCounts((prev) => ({ ...prev, [m.id]: i + 1 }));
+      if (voiceEnabledRef.current) {
+        await speak(chunks[i], session.level);
+      } else {
+        await delay(Math.min(500 + chunks[i].length * 20, 2500));
+      }
+    }
+    revealingIdsRef.current.delete(m.id);
+    abortedIdsRef.current.delete(m.id);
+  }, [session.level]);
+
+  // New assistant messages reveal bubble-by-bubble (with speech, when on); messages already on
+  // the page from a prior load (reload/refresh) just render fully, with no replay.
   useEffect(() => {
-    if (!voiceEnabled) return;
-    const last = messages[messages.length - 1];
-    if (!last || last.role !== "assistant") return;
-    if (lastSpokenMessageIdRef.current === last.id) return;
-    lastSpokenMessageIdRef.current = last.id;
-    speak(last.content);
-  }, [messages, voiceEnabled]);
+    if (seenMessageIdsRef.current === null) {
+      seenMessageIdsRef.current = new Set(messages.map((m) => m.id));
+      const initial: Record<number, number> = {};
+      for (const m of messages) {
+        initial[m.id] = m.role === "assistant" ? Math.max(1, splitIntoChunks(m.content).length) : 1;
+      }
+      setRevealedChunkCounts(initial);
+      return;
+    }
+    for (const m of messages) {
+      if (m.role !== "assistant" || seenMessageIdsRef.current.has(m.id)) continue;
+      seenMessageIdsRef.current.add(m.id);
+      void revealMessage(m);
+    }
+  }, [messages, revealMessage]);
 
   const handleSend = async (override?: string) => {
     const content = (override ?? draft).trim();
     if (!content || sending) return;
     stopSpeaking(); // the learner asking a question interrupts whatever the teacher was saying
+    for (const id of revealingIdsRef.current) abortedIdsRef.current.add(id);
     setSending(true);
     setSendError(null);
     setDraft("");
@@ -147,6 +192,22 @@ export default function ChatPane({
           >
             {voiceEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
           </button>
+          {voiceEnabled && (
+            <div className="inline-flex rounded-full border border-line overflow-hidden">
+              {SPEEDS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => { setSpeed(s.id); setSpeechSpeed(s.id); }}
+                  aria-pressed={speed === s.id}
+                  title={`Teacher speed: ${s.id}`}
+                  className={`px-2 py-1 text-[11px] font-semibold transition-colors ${speed === s.id ? "bg-brand text-white" : "bg-surface text-ink-soft hover:bg-surface-hover"}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
           {canTogglePause && (
             <Button size="sm" variant="secondary" loading={actionBusy} onClick={togglePause}
               leftIcon={session.status === "teaching" ? <Pause size={14} /> : <Play size={14} />}>
@@ -169,11 +230,15 @@ export default function ChatPane({
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3" aria-live="polite">
-        {narrationSegments.map((seg) => (
-          <Bubble key={seg.id} role="assistant">
-            <ReactMarkdown>{normalizeMathText(seg.text)}</ReactMarkdown>
-          </Bubble>
-        ))}
+        {narrationSegments.map((seg) =>
+          // Safety net on top of the LLM's own short-reply formatting: a segment that still came
+          // back long renders as several short bubbles instead of one block of text.
+          splitIntoChunks(seg.text).map((chunk, i) => (
+            <Bubble key={`${seg.id}-${i}`} role="assistant">
+              <ReactMarkdown>{normalizeMathText(chunk)}</ReactMarkdown>
+            </Bubble>
+          )),
+        )}
         {step && step.status === "generating" && <TypingIndicator />}
 
         {messages.map((m) => {
@@ -201,11 +266,27 @@ export default function ChatPane({
               </div>
             );
           }
+          if (m.role !== "assistant") {
+            return (
+              <Bubble key={m.id} role={m.role === "user" ? "user" : "assistant"} muted={m.role === "event"} time={formatTime(m.created_at)}>
+                <ReactMarkdown>{normalizeMathText(m.content)}</ReactMarkdown>
+              </Bubble>
+            );
+          }
+          // Long answers arrive as several short bubbles, revealed one after another (in sync
+          // with speech when voice is on), instead of one wall of text.
+          const chunks = splitIntoChunks(m.content);
+          const revealed = revealedChunkCounts[m.id] ?? 0;
           return (
-            <Bubble key={m.id} role={m.role === "user" ? "user" : "assistant"} muted={m.role === "event"} time={formatTime(m.created_at)}>
-              {m.meta?.error && <AlertCircle size={13} className="inline mr-1 text-danger" />}
-              <ReactMarkdown>{normalizeMathText(m.content)}</ReactMarkdown>
-            </Bubble>
+            <Fragment key={m.id}>
+              {chunks.slice(0, revealed).map((chunk, i) => (
+                <Bubble key={`${m.id}-${i}`} role="assistant" time={i === revealed - 1 && revealed >= chunks.length ? formatTime(m.created_at) : undefined}>
+                  {m.meta?.error && i === 0 && <AlertCircle size={13} className="inline mr-1 text-danger" />}
+                  <ReactMarkdown>{normalizeMathText(chunk)}</ReactMarkdown>
+                </Bubble>
+              ))}
+              {revealed < chunks.length && <TypingIndicator />}
+            </Fragment>
           );
         })}
         {sending && <TypingIndicator />}

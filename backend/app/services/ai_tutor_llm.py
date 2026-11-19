@@ -153,6 +153,18 @@ async def generate_outline(sources: list[dict], level: str, mode: str) -> list[d
     return [s.model_dump() for s in result.steps]
 
 
+_FORMATTING_RULES = (
+    "Formatting for every reply, so it never looks like a wall of text to a child:\n"
+    "- Short sentences: about 12-15 words each, at most.\n"
+    "- One idea per line. Use bullet points or numbered steps where it fits naturally.\n"
+    "- Bold only the single key word in a line, not whole phrases, e.g. \"Plants make food using "
+    "**sunlight** ☀️\".\n"
+    "- At most one emoji per line, and only where it genuinely helps — don't decorate every line.\n"
+    "- Keep it to about 4-5 short lines; if there's naturally more to say, prefer a short "
+    "numbered/bulleted list over a long paragraph."
+)
+
+
 async def generate_step(
     *, step_title: str, step_summary: str, source_refs: list[dict], sources: list[dict],
     level: str, step_index: int, step_count: int,
@@ -161,7 +173,8 @@ async def generate_step(
         f"{_base_system(level)}\n\n"
         "Generate the content for ONE lesson step: write narration segments, whiteboard-style "
         "board blocks that accompany them, and highlights that point at exact quotes copied "
-        "verbatim from the source pages."
+        "verbatim from the source pages. Each narration segment is shown to the child as its own "
+        f"chat bubble, so keep each segment to one short chunk.\n\n{_FORMATTING_RULES}"
     )
     prompt = (
         f'Step {step_index + 1} of {step_count}: "{step_title}"\n'
@@ -169,6 +182,39 @@ async def generate_step(
     )
     result = await _structured_generate(system, prompt, _StepContentModel)
     return result.model_dump()
+
+
+_QA_STYLE = (
+    "You are chatting with a child during their lesson — a warm, friendly human tutor having a "
+    "quick back-and-forth, not an encyclopedia. Before replying, silently work out which of these "
+    "the learner's message is, and answer in that style:\n\n"
+    "- ON-TOPIC (about the material/topic): answer at the learner's level. If it's covered in the "
+    "material, say where, e.g. \"Yes, great question! Butterflies are mentioned in your chapter "
+    "in the part about pollination, because they carry pollen from flower to flower...\"\n"
+    "- RELATED BUT NOT IN THE MATERIAL: answer briefly and kindly, then connect it back to the "
+    "lesson, e.g. \"That isn't in your chapter, but here's a quick answer... and it links to what "
+    "we're learning because...\"\n"
+    "- OFF-TOPIC (unrelated to studying, e.g. sports results, games, gossip): never lecture or "
+    "scold. Be kind and encouraging, then redirect, e.g. \"Ha, that's a fun one! 😊 Let's keep our "
+    "brains on our lesson for now. You're doing really well! Want to know [something related to "
+    "the lesson]?\"\n"
+    "- INAPPROPRIATE for a child: politely decline in one friendly sentence and steer back to the "
+    "lesson. Never be harsh or preachy.\n"
+    "- GREETING, SMALL TALK, OR CONFUSION (hi, yo, thanks, bro, huh, wth): if one of these slips "
+    "through to you, give a short warm reply that brings them back to the lesson. Never explain "
+    "the literal meaning of a greeting word, and never give a lecture about a casual phrase.\n\n"
+    "Style for every reply:\n"
+    "- Short: 2-5 sentences unless the learner clearly asks for more detail.\n"
+    "- Praise good questions naturally sometimes (\"Ooh, smart question!\"), but not on every "
+    "message — it should feel genuine, not scripted.\n"
+    "- Warm, polite, and culturally respectful. At most a couple of emojis.\n"
+    "- End most replies with one friendly follow-up offer, like \"Want me to give you an example?\" "
+    "or \"Shall we carry on with the lesson?\"\n"
+    "- Reply in the same language the learner used (English, Urdu, Hindi, or Roman Urdu).\n"
+    "- Use markdown or LaTeX ($...$) only if it genuinely helps (like showing a formula) — don't "
+    "over-format a short, friendly chat reply.\n\n"
+    f"{_FORMATTING_RULES}"
+)
 
 
 async def answer_question(
@@ -185,13 +231,10 @@ async def answer_question(
         )
     else:
         grounding = (
-            "Answer the learner's question using only the material and context given to you. If "
-            "the material doesn't cover something, say so rather than guessing."
+            "When the message is a real question, answer it using the material and context given "
+            "to you. If the material doesn't cover something, say so rather than guessing."
         )
-    system = (
-        f"{_base_system(level)}\n\n{grounding} Keep answers focused; use markdown and LaTeX "
-        "($...$) where helpful."
-    )
+    system = f"{_base_system(level)}\n\n{_QA_STYLE}\n\n{grounding}"
     messages = [SystemMessage(content=system)]
     for h in history:
         cls = HumanMessage if h["role"] == "user" else AIMessage
@@ -217,7 +260,7 @@ async def reexplain_step(*, step_title: str, step_summary: str, step_text: str, 
         f"{_base_system(level)}\n\n"
         "The learner said they didn't understand the current lesson step. Re-explain it in a "
         "SIMPLER way than before: shorter sentences, plainer words, and include one concrete, "
-        "relatable example. Do not just repeat the same wording."
+        f"relatable example. Do not just repeat the same wording.\n\n{_FORMATTING_RULES}"
     )
     prompt = f'Step: "{step_title}"\nSummary: {step_summary}\nOriginal explanation: {step_text}'
 
@@ -230,4 +273,30 @@ async def reexplain_step(*, step_title: str, step_summary: str, step_text: str, 
     answer = response_text(response)
     if not answer:
         raise AiTutorLLMError("The AI tutor did not return a re-explanation.")
+    return answer
+
+
+async def greet_back(*, message: str, lesson_topic: str, level: str) -> str:
+    """The learner sent a greeting or small talk ("hi", "yo", "thanks") — reply like a warm,
+    friendly human tutor would, never like an encyclopedia explaining the greeting word itself."""
+    system = (
+        f"{_base_system(level)}\n\n"
+        "The learner just sent a greeting or small talk, not a real question. Reply like a warm, "
+        "friendly human teacher: 1-2 short, cheerful sentences that respond naturally to what "
+        "they said (e.g. if they said thanks, acknowledge it; if they asked how you are, answer "
+        "briefly), then gently invite them back to the lesson by name. Never explain what the "
+        "greeting word itself means. At most one emoji. Reply in the same language they used. "
+        "Keep it to 1-2 short lines — no need for bullets or bold here, just a quick, warm reply."
+    )
+    prompt = f'Lesson topic: "{lesson_topic}"\nLearner said: "{message}"'
+
+    try:
+        response = await get_llm().ainvoke([SystemMessage(content=system), HumanMessage(content=prompt)])
+    except Exception as exc:
+        logger.error("AI Tutor: Gemini greeting request failed: %s", exc)
+        raise AiTutorLLMError(f"The AI tutor is temporarily unavailable: {exc}") from exc
+
+    answer = response_text(response)
+    if not answer:
+        raise AiTutorLLMError("The AI tutor did not return a greeting reply.")
     return answer
